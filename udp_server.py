@@ -1,15 +1,16 @@
 """
 UDP tabanlı chat sunucusu.
 - Çok kullanıcılı, güvenilirlik mekanizmalı UDP chat sunucusu.
-- Protokol: network/protocol.py
-- Özellikler: pencere yönetimi, paket parçalama, RTT, bağlantı yönetimi.
+- Protokol: network/protocol.py (v1.2)
+- Özellikler: pencere yönetimi, paket parçalama, RTT, bağlantı yönetimi, hata yönetimi.
 """
 import socket
 import threading
 import time
 from datetime import datetime
 from protocol import (
-    build_packet, parse_packet, PROTOCOL_VERSION, MAX_PACKET_SIZE,
+    build_packet, parse_packet, PROTOCOL_VERSION, MIN_SUPPORTED_VERSION,
+    MAX_PACKET_SIZE, MESSAGE_TYPES, ERROR_CODES, version_compatible,
     fragmenter, window, RETRY_TIMEOUT, MAX_RETRIES
 )
 
@@ -18,7 +19,7 @@ class UDPServer:
         self.host = host
         self.port = port
         self.sock = None
-        self.clients = {}  # {addr: {"username": str, "window": SlidingWindow}}
+        self.clients = {}  # {addr: {"username": str, "version": str, "window": SlidingWindow, "last_seen": float}}
         self.running = False
         self.lock = threading.Lock()
         
@@ -29,8 +30,9 @@ class UDPServer:
         self.running = True
         
         print(f"[*] UDP Sunucu başlatıldı - {self.host}:{self.port}")
-        print(f"[*] Protokol v{PROTOCOL_VERSION}")
-        print(f"[*] Maksimum paket boyutu: {MAX_PACKET_SIZE} byte")
+        print(f"[*] Protokol v{PROTOCOL_VERSION} (Min: v{MIN_SUPPORTED_VERSION})")
+        print(f"[*] Maksimum paket boyutu: {MAX_PACKET_SIZE} bytes")
+        print(f"[*] Yeniden gönderim: {MAX_RETRIES} deneme, {RETRY_TIMEOUT}s timeout")
         
         # İstemci yönetimi thread'i
         threading.Thread(target=self.manage_clients, daemon=True).start()
@@ -57,7 +59,8 @@ class UDPServer:
                 try:
                     self.sock.sendto(build_packet(
                         "SERVER", "error",
-                        "Sunucu kapatılıyor..."
+                        "Sunucu kapatılıyor...",
+                        error_code=0x0A
                     ), addr)
                 except:
                     pass
@@ -66,7 +69,7 @@ class UDPServer:
         if self.sock:
             self.sock.close()
             
-        print("[*] Sunucu kapatıldı")
+        print("[*] UDP Sunucu kapatıldı")
         
     def manage_clients(self):
         """İstemci bağlantılarını yönet"""
@@ -85,7 +88,11 @@ class UDPServer:
                         username = self.clients[addr]["username"]
                         del self.clients[addr]
                         self.broadcast_message(
-                            build_packet("SERVER", "leave", f"{username} bağlantısı koptu")
+                            build_packet(
+                                "SERVER", "leave",
+                                f"{username} bağlantısı koptu (Timeout)",
+                                error_code=0x07
+                            )
                         )
                         
                 time.sleep(5)  # Her 5 saniyede bir kontrol et
@@ -98,18 +105,46 @@ class UDPServer:
         try:
             packet = parse_packet(data)
             if not packet:
+                # Geçersiz paket
+                self.sock.sendto(build_packet(
+                    "SERVER", "error",
+                    "Geçersiz paket formatı",
+                    error_code=0x01
+                ), addr)
                 return
+                
             header = packet["header"]
             msg_type = header["type"]
+            
+            # Hata kodu kontrolü
+            if "error_code" in header:
+                error_code = header["error_code"]
+                if error_code != 0x00:  # Başarılı değilse
+                    username = self.clients.get(addr, {}).get("username", "Bilinmeyen")
+                    print(f"[!] İstemci hatası ({username}): {ERROR_CODES.get(error_code, 'Bilinmeyen hata')}")
+                    return
+            
+            # Versiyon kontrolü
+            client_version = header["version"]
+            if not version_compatible(client_version):
+                self.sock.sendto(build_packet(
+                    "SERVER", "error",
+                    f"Protokol versiyonu uyumsuz. Sunucu: {PROTOCOL_VERSION}, İstemci: {client_version}",
+                    error_code=0x02
+                ), addr)
+                return
+            
             # RTT ölçümü için ping mesajı
             if msg_type == "ping":
                 # Aynı ping_time ile pong cevabı gönder
                 extra = packet["payload"].get("extra", {})
                 pong_packet = build_packet(
-                    "SERVER", "pong", extra_payload=extra
+                    "SERVER", "pong",
+                    extra_payload=extra
                 )
                 self.sock.sendto(pong_packet, addr)
                 return
+                
             # ACK işleme
             if msg_type == "ack":
                 with self.lock:
@@ -135,6 +170,11 @@ class UDPServer:
                     # Tamamlanan paketi işle
                     packet = parse_packet(complete_data)
                     if not packet:
+                        self.sock.sendto(build_packet(
+                            "SERVER", "error",
+                            "Parça birleştirme hatası",
+                            error_code=0x08
+                        ), addr)
                         return
                     header = packet["header"]
                     msg_type = header["type"]
@@ -152,14 +192,30 @@ class UDPServer:
                 if addr not in self.clients:
                     if msg_type == "join":
                         username = header["sender"]
+                        
+                        # Kullanıcı adı kontrolü
+                        if any(c["username"] == username for c in self.clients.values()):
+                            self.sock.sendto(build_packet(
+                                "SERVER", "error",
+                                "Bu kullanıcı adı zaten kullanımda.",
+                                error_code=0x0A
+                            ), addr)
+                            return
+                            
                         self.clients[addr] = {
                             "username": username,
+                            "version": client_version,
                             "window": window.SlidingWindow(),
                             "last_seen": time.time()
                         }
                         self.broadcast_message(
-                            build_packet("SERVER", "join", f"{username} katıldı")
+                            build_packet(
+                                "SERVER", "join",
+                                f"{username} katıldı (Protokol v{client_version})"
+                            )
                         )
+                        # Kullanıcı listesini gönder
+                        self.send_user_list(addr)
                     return
                 else:
                     self.clients[addr]["last_seen"] = time.time()
@@ -175,8 +231,21 @@ class UDPServer:
                         username = self.clients[addr]["username"]
                         del self.clients[addr]
                         self.broadcast_message(
-                            build_packet("SERVER", "leave", f"{username} ayrıldı")
+                            build_packet(
+                                "SERVER", "leave",
+                                f"{username} ayrıldı"
+                            )
                         )
+            elif msg_type == "version_check":
+                # Versiyon kontrolü yanıtı
+                self.sock.sendto(build_packet(
+                    "SERVER", "version_check",
+                    f"Sunucu protokol versiyonu: {PROTOCOL_VERSION}",
+                    extra_payload={
+                        "server_version": PROTOCOL_VERSION,
+                        "min_version": MIN_SUPPORTED_VERSION
+                    }
+                ), addr)
                         
             # ACK gönder
             if "seq" in header:
@@ -188,6 +257,37 @@ class UDPServer:
                 
         except Exception as e:
             print(f"[!] Paket işleme hatası: {e}")
+            try:
+                self.sock.sendto(build_packet(
+                    "SERVER", "error",
+                    f"Paket işleme hatası: {str(e)}",
+                    error_code=0x0A
+                ), addr)
+            except:
+                pass
+            
+    def send_user_list(self, addr):
+        """Belirli bir istemciye kullanıcı listesini gönder"""
+        with self.lock:
+            user_list = [
+                {
+                    "username": c["username"],
+                    "version": c["version"]
+                }
+                for c in self.clients.values()
+            ]
+            msg = build_packet(
+                "SERVER", "userlist",
+                extra_payload={
+                    "users": user_list,
+                    "server_version": PROTOCOL_VERSION,
+                    "min_version": MIN_SUPPORTED_VERSION
+                }
+            )
+            try:
+                self.sock.sendto(msg, addr)
+            except:
+                pass
             
     def broadcast_message(self, packet, exclude=None):
         """Mesajı tüm istemcilere ilet"""
@@ -246,6 +346,8 @@ class UDPServer:
                                                 
                                 except:
                                     retries += 1
+                                    if retries == MAX_RETRIES:
+                                        print(f"[!] Mesaj iletilemedi ({client['username']}): Maksimum yeniden deneme sayısı aşıldı")
                                     
                     except Exception as e:
                         print(f"[!] Mesaj iletim hatası ({addr}): {e}")

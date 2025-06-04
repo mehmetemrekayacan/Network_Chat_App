@@ -1,34 +1,33 @@
 """
 Chat Uygulaması Protokol Spesifikasyonu
-Versiyon: 1.1
+Versiyon: 1.2
 
 Bu modül, chat uygulamasının ağ protokolünü tanımlar ve yönetir.
 
-- Paket yapısı, desteklenen mesaj tipleri, güvenilirlik ve parçalama mekanizmaları detaylı açıklanmıştır.
-- Tüm fonksiyon ve sınıflar için kapsamlı docstring eklenmiştir.
-
-Kullanım:
-- build_packet: Protokole uygun yeni bir paket oluşturur.
-- parse_packet: Gelen veriyi doğrular ve ayrıştırır.
-- PacketFragmenter: Büyük paketleri parçalara böler ve birleştirir.
-- SlidingWindow: Akış kontrolü ve güvenilirlik için pencere yönetimi sağlar.
+Protokol Özellikleri:
+- Versiyon: 1.2 (1.1 ile geriye dönük uyumlu)
+- Güvenlik: SHA-256 checksum, paket doğrulama
+- Güvenilirlik: Sliding window, ACK mekanizması
+- Parçalama: Büyük paketler için otomatik parçalama
+- Akış Kontrolü: Dinamik pencere boyutu yönetimi
 
 Protokol Yapısı:
 {
     "header": {
-        "version": str,        # Protokol versiyonu (örn: "1.1")
+        "version": str,        # Protokol versiyonu (örn: "1.2")
         "type": str,          # Mesaj tipi
         "timestamp": str,     # ISO formatında zaman damgası
         "sender": str,        # Gönderen kullanıcı adı
-        "seq": int,          # Sıra numarası
-        "ack": int,          # Onay numarası
-        "window": int,       # Pencere boyutu
+        "seq": int,          # Sıra numarası (opsiyonel)
+        "ack": int,          # Onay numarası (opsiyonel)
+        "window": int,       # Pencere boyutu (opsiyonel)
         "fragment": {        # Paket parçalama bilgisi (opsiyonel)
             "id": int,       # Parça ID
             "total": int,    # Toplam parça sayısı
             "size": int      # Parça boyutu
         },
-        "checksum": str      # SHA-256 hash
+        "checksum": str,     # SHA-256 hash
+        "error_code": int    # Hata kodu (opsiyonel)
     },
     "payload": {
         "text": str,         # Mesaj metni
@@ -36,38 +35,92 @@ Protokol Yapısı:
     }
 }
 
-Mesaj Tipleri:
-- join: Kullanıcı katılma
-- message: Normal mesaj
-- leave: Kullanıcı ayrılma
-- ack: Onay mesajı
-- error: Hata mesajı
-- userlist: Kullanıcı listesi
-- window_update: Pencere boyutu güncelleme
-- ping: RTT ölçümü için istemciden sunucuya (veya P2P)
-- pong: RTT ölçümü için sunucudan istemciye (veya P2P)
+Mesaj Tipleri ve Hata Kodları:
+1. Temel Mesajlar:
+   - join (0x01): Kullanıcı katılma
+   - message (0x02): Normal mesaj
+   - leave (0x03): Kullanıcı ayrılma
+   - ack (0x04): Onay mesajı
+   - error (0x05): Hata mesajı
+   - userlist (0x06): Kullanıcı listesi
+
+2. Kontrol Mesajları:
+   - window_update (0x07): Pencere boyutu güncelleme
+   - ping (0x08): RTT ölçümü (istemci->sunucu)
+   - pong (0x09): RTT ölçümü (sunucu->istemci)
+   - version_check (0x0A): Versiyon kontrolü
+
+3. Hata Kodları:
+   - 0x00: Başarılı
+   - 0x01: Geçersiz paket formatı
+   - 0x02: Versiyon uyumsuzluğu
+   - 0x03: Checksum hatası
+   - 0x04: Paket boyutu aşımı
+   - 0x05: Desteklenmeyen mesaj tipi
+   - 0x06: Sunucu dolu
+   - 0x07: Zaman aşımı
+   - 0x08: Parça hatası
+   - 0x09: Pencere taşması
+   - 0x0A: Diğer hatalar
+
+Paket Boyutu Limitleri:
+- Maksimum: 4096 bytes (4 KB)
+- Minimum: 1024 bytes (1 KB, parçalama için)
+- Önerilen: 2048 bytes (2 KB)
+
+Güvenlik:
+- SHA-256 checksum ile paket bütünlüğü
+- Zaman damgası ile replay saldırılarına karşı koruma
+- Sıra numarası ile paket sıralaması
 """
 
 import json
 import hashlib
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Set
 import math
 
 # Protokol sabitleri
-PROTOCOL_VERSION = "1.1"
+PROTOCOL_VERSION = "1.2"
+MIN_SUPPORTED_VERSION = "1.1"  # Minimum desteklenen versiyon
 MAX_PACKET_SIZE = 4096  # bytes
 MIN_PACKET_SIZE = 1024  # bytes (parçalama için minimum boyut)
+RECOMMENDED_PACKET_SIZE = 2048  # bytes (önerilen boyut)
 MAX_WINDOW_SIZE = 10    # Maksimum pencere boyutu
 INITIAL_WINDOW_SIZE = 5 # Başlangıç pencere boyutu
 MAX_RETRIES = 5        # Maksimum yeniden gönderim denemesi
 RETRY_TIMEOUT = 2.0    # Yeniden gönderim zaman aşımı (saniye)
 FRAGMENT_TIMEOUT = 5.0 # Parça zaman aşımı (saniye)
 
-SUPPORTED_MESSAGE_TYPES = {
-    "join", "message", "leave", "ack", "error", 
-    "userlist", "window_update", "ping", "pong"
+# Mesaj tipleri ve hata kodları
+MESSAGE_TYPES = {
+    "join": 0x01,
+    "message": 0x02,
+    "leave": 0x03,
+    "ack": 0x04,
+    "error": 0x05,
+    "userlist": 0x06,
+    "window_update": 0x07,
+    "ping": 0x08,
+    "pong": 0x09,
+    "version_check": 0x0A
 }
+
+ERROR_CODES = {
+    0x00: "Başarılı",
+    0x01: "Geçersiz paket formatı",
+    0x02: "Versiyon uyumsuzluğu",
+    0x03: "Checksum hatası",
+    0x04: "Paket boyutu aşımı",
+    0x05: "Desteklenmeyen mesaj tipi",
+    0x06: "Sunucu dolu",
+    0x07: "Zaman aşımı",
+    0x08: "Parça hatası",
+    0x09: "Pencere taşması",
+    0x0A: "Diğer hatalar"
+}
+
+SUPPORTED_MESSAGE_TYPES = set(MESSAGE_TYPES.keys())
 
 class PacketFragmenter:
     """Paket parçalama ve birleştirme işlemlerini yönetir"""
@@ -200,6 +253,15 @@ class SlidingWindow:
         """Pencere boyutunu güncelle"""
         self.window_size = min(max(1, new_size), MAX_WINDOW_SIZE)
 
+def version_compatible(version: str) -> bool:
+    """Verilen versiyonun desteklenip desteklenmediğini kontrol eder"""
+    try:
+        v1 = tuple(map(int, version.split('.')))
+        v2 = tuple(map(int, MIN_SUPPORTED_VERSION.split('.')))
+        return v1 >= v2
+    except:
+        return False
+
 def calculate_checksum(data: Dict[str, Any]) -> str:
     """Verilen veri sözlüğünün SHA-256 hash'ini hesaplar"""
     # Header'dan checksum'ı çıkar
@@ -215,40 +277,40 @@ def calculate_checksum(data: Dict[str, Any]) -> str:
     # SHA-256 hash hesapla
     return hashlib.sha256(data_str.encode()).hexdigest()
 
-def validate_packet(packet: Dict[str, Any]) -> bool:
-    """Paketin geçerliliğini kontrol eder"""
+def validate_packet(packet: Dict[str, Any]) -> Tuple[bool, int]:
+    """Paketin geçerliliğini kontrol eder ve hata kodu döndürür"""
     try:
         # Gerekli alanların kontrolü
         if not all(k in packet for k in ["header", "payload"]):
-            return False
+            return False, 0x01
         if not all(k in packet["header"] for k in ["version", "type", "timestamp", "sender"]):
-            return False
+            return False, 0x01
             
         # Protokol versiyonu kontrolü
-        if packet["header"]["version"] != PROTOCOL_VERSION:
-            return False
+        if not version_compatible(packet["header"]["version"]):
+            return False, 0x02
             
         # Mesaj tipi kontrolü
         if packet["header"]["type"] not in SUPPORTED_MESSAGE_TYPES:
-            return False
+            return False, 0x05
             
         # Checksum kontrolü
         stored_checksum = packet["header"].get("checksum")
         if not stored_checksum:
-            return False
+            return False, 0x03
             
         calculated_checksum = calculate_checksum(packet)
         if stored_checksum != calculated_checksum:
-            return False
+            return False, 0x03
             
         # Paket boyutu kontrolü
         packet_size = len(json.dumps(packet).encode())
         if packet_size > MAX_PACKET_SIZE:
-            return False
+            return False, 0x04
             
-        return True
+        return True, 0x00
     except:
-        return False
+        return False, 0x0A
 
 def build_packet(
     sender: str,
@@ -258,7 +320,8 @@ def build_packet(
     ack: Optional[int] = None,
     window: Optional[int] = None,
     fragment_info: Optional[Dict[str, int]] = None,
-    extra_payload: Optional[Dict[str, Any]] = None
+    extra_payload: Optional[Dict[str, Any]] = None,
+    error_code: Optional[int] = None
 ) -> bytes:
     """Yeni bir paket oluşturur ve döndürür"""
     if msg_type not in SUPPORTED_MESSAGE_TYPES:
@@ -288,6 +351,8 @@ def build_packet(
         packet["header"]["fragment"] = fragment_info
     if extra_payload:
         packet["payload"]["extra"] = extra_payload
+    if error_code is not None:
+        packet["header"]["error_code"] = error_code
         
     # Checksum hesapla ve ekle
     packet["header"]["checksum"] = calculate_checksum(packet)
@@ -315,11 +380,15 @@ def parse_packet(data: bytes) -> Optional[Dict[str, Any]]:
         
         # Normal paket
         packet = json.loads(data.decode())
-        if validate_packet(packet):
+        is_valid, error_code = validate_packet(packet)
+        if is_valid:
+            return packet
+        else:
+            # Hata kodunu ekle
+            packet["header"]["error_code"] = error_code
             return packet
     except:
-        pass
-    return None
+        return None
 
 # Global nesneler
 fragmenter = PacketFragmenter()
