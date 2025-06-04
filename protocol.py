@@ -103,7 +103,9 @@ MESSAGE_TYPES = {
     "window_update": 0x07,
     "ping": 0x08,
     "pong": 0x09,
-    "version_check": 0x0A
+    "version_check": 0x0A,
+    "fragment_ack": 0x0B,
+    "fragment_nack": 0x0C
 }
 
 ERROR_CODES = {
@@ -201,21 +203,24 @@ class PacketFragmenter:
         return None
 
 class SlidingWindow:
-    """Pencere boyutu kontrolü ve sıralama yönetimi"""
+    """Pencere boyutu kontrolü, sıralama ve alıcı tarafı için out-of-order buffer yönetimi"""
     
     def __init__(self, initial_window_size: int = INITIAL_WINDOW_SIZE):
         self.window_size = initial_window_size
         self.base = 0  # Pencere başlangıcı
-        self.next_seq = 0  # Sonraki sıra numarası
+        self.next_seq = 0  # Sonraki sıra numarası (gönderici için)
         self.packets: Dict[int, Tuple[bytes, float]] = {}  # {seq: (packet, timestamp)}
         self.acks: Dict[int, bool] = {}  # {seq: acked}
+        # Alıcı tarafı için:
+        self.recv_buffer: Dict[int, Any] = {}  # {seq: packet}
+        self.expected_seq = 0  # Sırayla beklenen paket numarası
     
     def can_send(self) -> bool:
         """Yeni paket gönderilebilir mi kontrol et"""
         return self.next_seq < self.base + self.window_size
     
     def add_packet(self, packet: bytes) -> int:
-        """Yeni paket ekle ve sıra numarası ata"""
+        """Yeni paket ekle ve sıra numarası ata (gönderici için)"""
         if not self.can_send():
             raise ValueError("Pencere dolu")
             
@@ -226,7 +231,7 @@ class SlidingWindow:
         return seq
     
     def mark_acked(self, seq: int):
-        """Paketi onaylandı olarak işaretle"""
+        """Paketi onaylandı olarak işaretle (gönderici için)"""
         if seq in self.acks:
             self.acks[seq] = True
             # Pencereyi kaydır
@@ -236,7 +241,7 @@ class SlidingWindow:
                 self.base += 1
     
     def get_unacked_packets(self) -> List[Tuple[int, bytes]]:
-        """Onaylanmamış paketleri döndür"""
+        """Onaylanmamış paketleri döndür (gönderici için)"""
         current_time = datetime.now().timestamp()
         unacked = []
         
@@ -252,6 +257,23 @@ class SlidingWindow:
     def update_window_size(self, new_size: int):
         """Pencere boyutunu güncelle"""
         self.window_size = min(max(1, new_size), MAX_WINDOW_SIZE)
+
+    # --- Alıcı tarafı için gelişmiş sıralama ---
+    def add_incoming_packet(self, seq: int, packet: Any):
+        """Gelen paketi buffer'a ekle (out-of-order için)"""
+        if seq < self.expected_seq:
+            # Zaten işlendi, yok say
+            return
+        self.recv_buffer[seq] = packet
+
+    def get_in_order_packets(self) -> List[Any]:
+        """Buffer'dan sırayla işlenebilecek tüm paketleri döndür ve buffer'dan çıkar"""
+        in_order = []
+        while self.expected_seq in self.recv_buffer:
+            in_order.append(self.recv_buffer[self.expected_seq])
+            del self.recv_buffer[self.expected_seq]
+            self.expected_seq += 1
+        return in_order
 
 def version_compatible(version: str) -> bool:
     """Verilen versiyonun desteklenip desteklenmediğini kontrol eder"""
