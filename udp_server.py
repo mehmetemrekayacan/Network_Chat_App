@@ -72,18 +72,16 @@ class UDPServer:
         print("[*] UDP Sunucu kapatıldı")
         
     def manage_clients(self):
-        """İstemci bağlantılarını yönet"""
+        """İstemci bağlantılarını ve pencere boyutlarını yönet"""
         while self.running:
             try:
                 # Bağlantısı kopan istemcileri temizle
                 with self.lock:
                     current_time = time.time()
                     disconnected = []
-                    
                     for addr, client in self.clients.items():
                         if current_time - client["last_seen"] > 30:  # 30 saniye timeout
                             disconnected.append(addr)
-                            
                     for addr in disconnected:
                         username = self.clients[addr]["username"]
                         del self.clients[addr]
@@ -94,9 +92,29 @@ class UDPServer:
                                 error_code=0x07
                             )
                         )
-                        
+
+                    # --- DİNAMİK PENCERE BOYUTU KONTROLÜ ---
+                    for addr, client in self.clients.items():
+                        wnd = client["window"]
+                        # Basit bir mantık: Eğer çok fazla onaylanmamış paket varsa pencereyi küçült, azsa büyüt
+                        unacked = len([seq for seq, acked in wnd.acks.items() if not acked])
+                        prev_size = wnd.window_size
+                        if unacked > wnd.window_size // 2 and wnd.window_size > 1:
+                            wnd.update_window_size(wnd.window_size - 1)
+                        elif unacked == 0 and wnd.window_size < 10:
+                            wnd.update_window_size(wnd.window_size + 1)
+                        # Eğer pencere boyutu değiştiyse, istemciye window_update mesajı gönder
+                        if wnd.window_size != prev_size:
+                            try:
+                                self.sock.sendto(build_packet(
+                                    "SERVER", "window_update",
+                                    f"Pencere boyutu güncellendi: {wnd.window_size}",
+                                    window=wnd.window_size
+                                ), addr)
+                            except Exception as e:
+                                print(f"[!] Pencere boyutu güncelleme mesajı gönderilemedi: {e}")
+
                 time.sleep(5)  # Her 5 saniyede bir kontrol et
-                
             except Exception as e:
                 print(f"[!] İstemci yönetim hatası: {e}")
                 
@@ -165,6 +183,14 @@ class UDPServer:
                     fragment_id, fragment_no, total_fragments,
                     packet["payload"]["data"]
                 )
+                # Parça için fragment_ack gönder
+                self.sock.sendto(build_packet(
+                    "SERVER", "fragment_ack",
+                    extra_payload={
+                        "fragment_id": fragment_id,
+                        "fragment_no": fragment_no
+                    }
+                ), addr)
                 
                 if complete_data:
                     # Tamamlanan paketi işle
@@ -179,92 +205,96 @@ class UDPServer:
                     header = packet["header"]
                     msg_type = header["type"]
                 else:
-                    # Parça için ACK gönder
-                    self.sock.sendto(build_packet(
-                        "SERVER", "ack",
-                        seq=header.get("seq"),
-                        ack=header.get("seq")
-                    ), addr)
-                    return
-                    
-            # İstemci durumunu güncelle
-            with self.lock:
-                if addr not in self.clients:
-                    if msg_type == "join":
-                        username = header["sender"]
-                        
-                        # Kullanıcı adı kontrolü
-                        if any(c["username"] == username for c in self.clients.values()):
+                    # Eksik parça zaman aşımı için fragment_nack gönderme (örnek, gerçek zamanlayıcı ile daha iyi olur)
+                    missing = [i for i in range(total_fragments) if i not in fragmenter.fragments.get(fragment_id, {})]
+                    if missing:
+                        for miss_no in missing:
                             self.sock.sendto(build_packet(
-                                "SERVER", "error",
-                                "Bu kullanıcı adı zaten kullanımda.",
-                                error_code=0x0A
+                                "SERVER", "fragment_nack",
+                                extra_payload={
+                                    "fragment_id": fragment_id,
+                                    "fragment_no": miss_no
+                                }
                             ), addr)
-                            return
-                            
-                        self.clients[addr] = {
-                            "username": username,
-                            "version": client_version,
-                            "window": window.SlidingWindow(),
-                            "last_seen": time.time()
-                        }
-                        self.broadcast_message(
-                            build_packet(
-                                "SERVER", "join",
-                                f"{username} katıldı (Protokol v{client_version})"
-                            )
-                        )
-                        # Kullanıcı listesini gönder
-                        self.send_user_list(addr)
                     return
-                else:
-                    self.clients[addr]["last_seen"] = time.time()
-                    
-            # Mesaj tipine göre işle
-            if msg_type == "message":
-                # Mesajı diğer istemcilere ilet
-                self.broadcast_message(packet, exclude=addr)
-            elif msg_type == "leave":
-                # İstemciyi kaldır
-                with self.lock:
-                    if addr in self.clients:
-                        username = self.clients[addr]["username"]
-                        del self.clients[addr]
-                        self.broadcast_message(
-                            build_packet(
-                                "SERVER", "leave",
-                                f"{username} ayrıldı"
-                            )
-                        )
-            elif msg_type == "version_check":
-                # Versiyon kontrolü yanıtı
-                self.sock.sendto(build_packet(
-                    "SERVER", "version_check",
-                    f"Sunucu protokol versiyonu: {PROTOCOL_VERSION}",
-                    extra_payload={
-                        "server_version": PROTOCOL_VERSION,
-                        "min_version": MIN_SUPPORTED_VERSION
-                    }
-                ), addr)
-                        
-            # ACK gönder
-            if "seq" in header:
-                self.sock.sendto(build_packet(
-                    "SERVER", "ack",
-                    seq=header.get("seq"),
-                    ack=header.get("seq")
-                ), addr)
-                
+
+            # fragment_ack ve fragment_nack mesajlarını işleme (gönderici için temel altyapı)
+            if msg_type == "fragment_ack":
+                # Burada, gönderici tarafında parça için ACK alınırsa yeniden gönderim zamanlayıcısı sıfırlanabilir
+                # (Gelişmiş dosya transferi için kullanılabilir)
+                return
+            if msg_type == "fragment_nack":
+                # Burada, gönderici eksik parça için yeniden gönderim yapabilir
+                # (Gelişmiş dosya transferi için kullanılabilir)
+                print(f"[!] Eksik parça bildirimi alındı: {packet['payload'].get('extra', {})}")
+                return
+            
+            # --- GELİŞMİŞ SIRALAMA: Sıra numarası olan paketleri buffer'a ekle ---
+            if "seq" in header and addr in self.clients:
+                seq = header["seq"]
+                client_window = self.clients[addr]["window"]
+                client_window.add_incoming_packet(seq, packet)
+                # Sırayla işlenebilecek tüm paketleri sırayla işle
+                for in_order_packet in client_window.get_in_order_packets():
+                    self._process_incoming_packet(addr, in_order_packet)
+                # Bu paket zaten işlenecek, döngüye devam
+                return
+            else:
+                # Sıra numarası olmayan kontrol paketleri (örn. ping, pong, version_check)
+                self._process_incoming_packet(addr, packet)
+
         except Exception as e:
             print(f"[!] Paket işleme hatası: {e}")
             try:
                 self.sock.sendto(build_packet(
                     "SERVER", "error",
-                    f"Paket işleme hatası: {str(e)}",
+                    f"Sunucu işleme hatası: {e}",
                     error_code=0x0A
                 ), addr)
             except:
                 pass
+
+    def _process_incoming_packet(self, addr, packet):
+        """Sıralı işlenmesi gereken paketlerin işlenmesi (orijinal mesaj işleme kodu buraya taşındı)"""
+        header = packet["header"]
+        msg_type = header["type"]
+        # İstemci durumunu güncelle
+        with self.lock:
+            if addr in self.clients:
+                self.clients[addr]["last_seen"] = time.time()
+        # Mesaj tipine göre işle
+        if msg_type == "message":
+            # Mesajı diğer istemcilere ilet
+            self.broadcast_message(packet, exclude=addr)
+        elif msg_type == "leave":
+            # İstemciyi kaldır
+            with self.lock:
+                if addr in self.clients:
+                    username = self.clients[addr]["username"]
+                    del self.clients[addr]
+                    self.broadcast_message(
+                        build_packet(
+                            "SERVER", "leave",
+                            f"{username} ayrıldı"
+                        )
+                    )
+        elif msg_type == "version_check":
+            # Versiyon kontrolü yanıtı
+            self.sock.sendto(build_packet(
+                "SERVER", "version_check",
+                f"Sunucu protokol versiyonu: {PROTOCOL_VERSION}",
+                extra_payload={
+                    "server_version": PROTOCOL_VERSION,
+                    "min_version": MIN_SUPPORTED_VERSION
+                }
+            ), addr)
+        # ACK gönder
+        if "seq" in header:
+            self.sock.sendto(build_packet(
+                "SERVER", "ack",
+                seq=header.get("seq"),
+                ack=header.get("seq")
+            ), addr)
             
     def send_user_list(self, addr):
         """Belirli bir istemciye kullanıcı listesini gönder"""
