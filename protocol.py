@@ -1,15 +1,17 @@
 """
 Chat Uygulaması Protokol Spesifikasyonu
-Versiyon: 1.2
+Versiyon: 1.3
 
 Bu modül, chat uygulamasının ağ protokolünü tanımlar ve yönetir.
 
 Protokol Özellikleri:
-- Versiyon: 1.2 (1.1 ile geriye dönük uyumlu)
+- Versiyon: 1.3 (1.2 ile geriye dönük uyumlu)
 - Güvenlik: SHA-256 checksum, paket doğrulama
 - Güvenilirlik: Sliding window, ACK mekanizması
 - Parçalama: Büyük paketler için otomatik parçalama
 - Akış Kontrolü: Dinamik pencere boyutu yönetimi
+- P2P Desteği: Doğrudan düğümler arası iletişim
+- Ağ İzleme: Gerçek zamanlı durum ve performans takibi
 
 Protokol Yapısı:
 {
@@ -81,8 +83,8 @@ from typing import Dict, Any, Optional, List, Tuple, Set
 import math
 
 # Protokol sabitleri
-PROTOCOL_VERSION = "1.2"
-MIN_SUPPORTED_VERSION = "1.1"  # Minimum desteklenen versiyon
+PROTOCOL_VERSION = "1.3"
+MIN_SUPPORTED_VERSION = "1.2"  # Minimum desteklenen versiyon
 MAX_PACKET_SIZE = 4096  # bytes
 MIN_PACKET_SIZE = 1024  # bytes (parçalama için minimum boyut)
 RECOMMENDED_PACKET_SIZE = 2048  # bytes (önerilen boyut)
@@ -105,7 +107,17 @@ MESSAGE_TYPES = {
     "pong": 0x09,
     "version_check": 0x0A,
     "fragment_ack": 0x0B,
-    "fragment_nack": 0x0C
+    "fragment_nack": 0x0C,
+    "p2p_connect": 0x0D,
+    "p2p_accept": 0x0E,
+    "p2p_disconnect": 0x0F,
+    "p2p_message": 0x10,
+    "p2p_broadcast": 0x11,
+    "p2p_ping": 0x12,
+    "p2p_pong": 0x13,
+    "p2p_status": 0x14,
+    "p2p_topology": 0x15,
+    "p2p_message_ack": 0x16
 }
 
 ERROR_CODES = {
@@ -119,7 +131,12 @@ ERROR_CODES = {
     0x07: "Zaman aşımı",
     0x08: "Parça hatası",
     0x09: "Pencere taşması",
-    0x0A: "Diğer hatalar"
+    0x0A: "Diğer hatalar",
+    0x0B: "P2P bağlantı reddedildi",
+    0x0C: "P2P düğüm bulunamadı",
+    0x0D: "P2P bağlantı zaman aşımı",
+    0x0E: "P2P düğüm meşgul",
+    0x0F: "P2P ağ dolu"
 }
 
 SUPPORTED_MESSAGE_TYPES = set(MESSAGE_TYPES.keys())
@@ -343,7 +360,8 @@ def build_packet(
     window: Optional[int] = None,
     fragment_info: Optional[Dict[str, int]] = None,
     extra_payload: Optional[Dict[str, Any]] = None,
-    error_code: Optional[int] = None
+    error_code: Optional[int] = None,
+    is_p2p: bool = False  # P2P paketi mi?
 ) -> bytes:
     """Yeni bir paket oluşturur ve döndürür"""
     if msg_type not in SUPPORTED_MESSAGE_TYPES:
@@ -355,7 +373,8 @@ def build_packet(
             "version": PROTOCOL_VERSION,
             "type": msg_type,
             "timestamp": datetime.now().isoformat(),
-            "sender": sender
+            "sender": sender,
+            "is_p2p": is_p2p  # P2P paketi olduğunu belirt
         },
         "payload": {
             "text": text

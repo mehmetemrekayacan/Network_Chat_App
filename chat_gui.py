@@ -1,577 +1,842 @@
 """
 Modern arayüzlü chat uygulaması (Tkinter GUI).
-- TCP ve UDP sunucu başlatma/durdurma, kullanıcı yönetimi, mesajlaşma.
-- Protokol: network/protocol.py (v1.2)
-- Özellikler: çoklu chat odası, kullanıcı listesi, sunucu kontrolü, modern tema, versiyon yönetimi.
+- Merkezi bağlantı kontrolü (TCP, UDP ve P2P)
+- Ağ topolojisi görselleştirme
+- Gerçek zamanlı ağ durumu izleme
+- Gelişmiş RTT ölçümü
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, scrolledtext
 import threading
-import importlib.util
-import sys
-import os
 import time
-from datetime import datetime
-import socket
+from typing import Optional, Dict, Any
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib
+matplotlib.use('TkAgg')  # Tkinter backend kullan
 
-# Sunucu modüllerini dinamik olarak yükle
-def load_server_module(module_name):
-    module_path = os.path.join(os.path.dirname(__file__), f"{module_name}.py")
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+# Sunucu modüllerini import et
+import server
+import udp_server
+from p2p_node import P2PNode
 
-# Sunucu modüllerini yükle
-tcp_server = load_server_module("server")
-udp_server = load_server_module("udp_server")
-protocol = load_server_module("protocol")
+# Modern tema renkleri
+DARK_BG = "#2B2B2B"
+PANEL_BG = "#3C3C3C"
+BUTTON_BG = "#007ACC"
+BUTTON_FG = "#FFFFFF"
+ENTRY_BG = "#4D4D4D"
+TEXT_COLOR = "#FFFFFF"
+SECONDARY = "#005A9E"
+PRIMARY = "#007ACC"
+SUCCESS_COLOR = "#28A745"
+ERROR_COLOR = "#DC3545"
+WARNING_COLOR = "#FFC107"
 
-# Koyu, mat ve kontrastı düşük modern renkler
-BG_COLOR = "#23272e"         # Ana arka plan (füme)
-PANEL_BG = "#2e323a"        # Panel arka planı (biraz daha açık füme)
-PRIMARY = "#3a4a5a"         # Koyu mavi-gri
-SECONDARY = "#36404a"       # Gece yeşili/koyu gri
-TEXT_COLOR = "#e0e3e7"      # Açık gri (okunabilir)
-CHAT_BG = "#2d3138"         # Chat arka planı (daha açık füme)
-ENTRY_BG = "#353a42"        # Input arka planı (daha açık)
-BUTTON_BG = "#3a4a5a"       # Koyu mavi-gri
-BUTTON_FG = "#e0e3e7"       # Açık gri
-INDICATOR_ON = "#4be07b"    # Yeşil
-INDICATOR_OFF = "#ff5e5e"   # Kırmızı
-USER_ONLINE = "🟢"
-USER_OFFLINE = "🔴"
-MYTH_CHATS = ["Olimpos", "Valhalla", "Asgard", "Atlantis", "Shambhala"]
-
-class CommonChatApp:
+class ModernChatApp:
     def __init__(self, master):
         self.master = master
-        self.master.title(f"Ortak Chat Odası - Modern UI (Protokol v{protocol.PROTOCOL_VERSION})")
-        self.master.geometry("900x800")
-        self.master.minsize(700, 600)
-        self.master.maxsize(1200, 900)
-        self.master.configure(bg=BG_COLOR)
-
-        self.server_active = False
+        self.master.title("Modern Chat Uygulaması v2.0")
+        self.master.geometry("1200x800")
+        self.master.configure(bg=DARK_BG)
+        
+        # Bağlantı durumları
+        self.tcp_server = None
+        self.udp_server = None
+        self.p2p_node = None
+        
+        # Thread'ler
         self.tcp_server_thread = None
         self.udp_server_thread = None
-        self.tcp_server_instance = None
-        self.udp_server_instance = None
-        self.users = []  # (username, online:bool, version:str)
-        self.system_messages = []
-        self.chat_messages = {name: [] for name in MYTH_CHATS}
-        self.active_user = None
-        self.last_rtt = None
-        self.last_rtt_time = None
-        self.udp_client_socket = None  # UDP istemci soketi için
-        self.rtt_thread = None  # RTT ölçüm thread'i için
-
+        
+        # Kullanıcı verileri
+        self.current_username = ""
+        self.connected_users = {}
+        
+        # Ağ haritası penceresi
+        self.network_window = None
+        
+        # UI bileşenleri
+        self.connection_type = tk.StringVar(value="p2p")
+        
         self.setup_ui()
 
     def setup_ui(self):
-        # Üst panel: başlık, sunucu kontrolü ve durum göstergesi
-        top = tk.Frame(self.master, bg=BG_COLOR)
-        top.pack(fill=tk.X, padx=0, pady=(0, 5))
+        """Ana arayüzü kur"""
+        # Ana çerçeve
+        main_frame = tk.Frame(self.master, bg=DARK_BG)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Başlık ve protokol versiyonu
-        title_frame = tk.Frame(top, bg=BG_COLOR)
-        title_frame.pack(side=tk.LEFT, padx=20, pady=10)
+        # Sol panel - Chat alanı
+        self.setup_chat_area(main_frame)
         
-        tk.Label(title_frame, text="💬 Ortak Chat Odası", 
-                font=("Segoe UI", 18, "bold"), 
-                bg=BG_COLOR, fg=TEXT_COLOR).pack(side=tk.TOP)
-                
-        tk.Label(title_frame, text=f"Protokol v{protocol.PROTOCOL_VERSION} (Min: v{protocol.MIN_SUPPORTED_VERSION})",
-                font=("Segoe UI", 9), bg=BG_COLOR, fg=TEXT_COLOR).pack(side=tk.TOP)
+        # Orta panel - Kontrol paneli
+        self.setup_control_panel(main_frame)
         
-        # Sunucu kontrol ve durum göstergeleri için ortak frame
-        control_status_frame = tk.Frame(top, bg=BG_COLOR)
-        control_status_frame.pack(side=tk.RIGHT, padx=10, fill=tk.X)
+        # Sağ panel - Kullanıcılar
+        self.setup_users_panel(main_frame)
 
-        # Sunucu kontrol butonları (aynı satırda)
-        button_frame = tk.Frame(control_status_frame, bg=BG_COLOR)
-        button_frame.pack(side=tk.TOP, anchor="e")
+    def setup_chat_area(self, parent):
+        """Chat alanını kur"""
+        chat_frame = tk.Frame(parent, bg=PANEL_BG, relief="raised", bd=1)
+        chat_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         
-        self.tcp_start_btn = tk.Button(button_frame, text="TCP Başlat", 
-                                     command=self.start_tcp_server,
-                                     bg=BUTTON_BG, fg=BUTTON_FG, 
-                                     font=("Segoe UI", 10, "bold"),
-                                     relief="flat", bd=0,
-                                     activebackground=SECONDARY,
-                                     activeforeground=TEXT_COLOR)
-        self.tcp_start_btn.grid(row=0, column=0, padx=(0, 5))
+        # Başlık
+        tk.Label(chat_frame, text="💬 Sohbet Alanı", 
+                bg=PANEL_BG, fg=TEXT_COLOR,
+                font=("Segoe UI", 14, "bold")).pack(pady=10)
         
-        self.tcp_stop_btn = tk.Button(button_frame, text="TCP Durdur",
-                                    command=self.stop_tcp_server,
-                                    bg=SECONDARY, fg=BUTTON_FG,
-                                    font=("Segoe UI", 10, "bold"),
-                                    relief="flat", bd=0,
-                                    state=tk.DISABLED,
-                                    activebackground=PRIMARY,
-                                    activeforeground=TEXT_COLOR)
-        self.tcp_stop_btn.grid(row=0, column=1, padx=(0, 15))
+        # Chat mesajları
+        self.chat_display = scrolledtext.ScrolledText(
+            chat_frame, 
+            bg=DARK_BG, fg=TEXT_COLOR,
+            font=("Segoe UI", 11),
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            height=15
+        )
+        self.chat_display.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         
-        self.udp_start_btn = tk.Button(button_frame, text="UDP Başlat",
-                                     command=self.start_udp_server,
-                                     bg=BUTTON_BG, fg=BUTTON_FG,
-                                     font=("Segoe UI", 10, "bold"),
-                                     relief="flat", bd=0,
-                                     activebackground=SECONDARY,
-                                     activeforeground=TEXT_COLOR)
-        self.udp_start_btn.grid(row=0, column=2, padx=(0, 5))
+        # Mesaj giriş alanı
+        msg_frame = tk.Frame(chat_frame, bg=PANEL_BG)
+        msg_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         
-        self.udp_stop_btn = tk.Button(button_frame, text="UDP Durdur",
-                                    command=self.stop_udp_server,
-                                    bg=SECONDARY, fg=BUTTON_FG,
-                                    font=("Segoe UI", 10, "bold"),
-                                    relief="flat", bd=0,
-                                    state=tk.DISABLED,
-                                    activebackground=PRIMARY,
-                                    activeforeground=TEXT_COLOR)
-        self.udp_stop_btn.grid(row=0, column=3)
+        self.message_entry = tk.Entry(
+            msg_frame,
+            bg=ENTRY_BG, fg=TEXT_COLOR,
+            font=("Segoe UI", 11),
+            relief="flat",
+            insertbackground=TEXT_COLOR
+        )
+        self.message_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.message_entry.bind("<Return>", self.send_message)
+        
+        self.send_btn = tk.Button(
+            msg_frame, text="Gönder",
+            command=self.send_message,
+            bg=BUTTON_BG, fg=BUTTON_FG,
+            font=("Segoe UI", 10, "bold"),
+            relief="flat"
+        )
+        self.send_btn.pack(side=tk.RIGHT)
+        
+        # Sistem mesajları
+        tk.Label(chat_frame, text="🔧 Sistem Mesajları", 
+                bg=PANEL_BG, fg=TEXT_COLOR,
+                font=("Segoe UI", 12, "bold")).pack(pady=(10, 5))
+        
+        self.system_display = scrolledtext.ScrolledText(
+            chat_frame,
+            bg=DARK_BG, fg=WARNING_COLOR,
+            font=("Segoe UI", 10),
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            height=8
+        )
+        self.system_display.pack(fill=tk.X, padx=10, pady=(0, 10))
 
-        # Sunucu durum göstergeleri (aynı satırda)
-        status_frame = tk.Frame(control_status_frame, bg=BG_COLOR)
-        status_frame.pack(side=tk.TOP, anchor="e", pady=(5,0))
+    def setup_control_panel(self, parent):
+        """Merkezi kontrol panelini kur"""
+        control_frame = tk.Frame(parent, bg=PANEL_BG, relief="raised", bd=1)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         
-        self.tcp_status_indicator = tk.Canvas(status_frame, width=18, height=18, 
-                                            bg=BG_COLOR, highlightthickness=0)
-        self.tcp_status_indicator.grid(row=0, column=0, padx=(0, 5))
-        self.tcp_status_label = tk.Label(status_frame, text="TCP: Kapalı", 
-                                       font=("Segoe UI", 11), bg=BG_COLOR, fg=INDICATOR_OFF)
-        self.tcp_status_label.grid(row=0, column=1, padx=(0, 15))
+        # Başlık
+        tk.Label(control_frame, text="⚙️ Bağlantı Kontrolü", 
+                bg=PANEL_BG, fg=TEXT_COLOR,
+                font=("Segoe UI", 14, "bold")).pack(pady=10)
         
-        self.udp_status_indicator = tk.Canvas(status_frame, width=18, height=18, 
-                                            bg=BG_COLOR, highlightthickness=0)
-        self.udp_status_indicator.grid(row=0, column=2, padx=(0, 5))
-        self.udp_status_label = tk.Label(status_frame, text="UDP: Kapalı", 
-                                       font=("Segoe UI", 11), bg=BG_COLOR, fg=INDICATOR_OFF)
-        self.udp_status_label.grid(row=0, column=3, padx=(0, 15))
+        # Kullanıcı adı girişi
+        user_frame = tk.LabelFrame(control_frame, text="👤 Kullanıcı Bilgileri",
+                                  bg=PANEL_BG, fg=TEXT_COLOR,
+                                  font=("Segoe UI", 11, "bold"))
+        user_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         
-        self.rtt_label = tk.Label(status_frame, text="RTT: --", 
-                                font=("Segoe UI", 11), bg=BG_COLOR, fg=TEXT_COLOR)
-        self.rtt_label.grid(row=0, column=4, padx=(0, 15))
-
-        # Ana alan: kullanıcılar ve chat
-        main = tk.Frame(self.master, bg=BG_COLOR)
-        main.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        tk.Label(user_frame, text="Kullanıcı Adı:",
+                bg=PANEL_BG, fg=TEXT_COLOR,
+                font=("Segoe UI", 10)).pack(anchor="w", padx=5, pady=(5, 0))
         
-        # Kullanıcılar paneli
-        user_panel = tk.Frame(main, bg=PANEL_BG)
-        user_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20), pady=0)
-        user_panel.grid_rowconfigure(0, weight=1)
-        user_panel.grid_rowconfigure(1, weight=0)
-        user_panel.grid_columnconfigure(0, weight=1)
-        
-        tk.Label(user_panel, text="Kullanıcılar", bg=PANEL_BG, fg=TEXT_COLOR, 
-                font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky="ew", pady=(0, 8))
-                
-        self.user_listbox = tk.Listbox(user_panel, bg=ENTRY_BG, fg=TEXT_COLOR, 
-                                     font=("Segoe UI", 11), relief="flat",
-                                     selectbackground=PRIMARY, selectforeground=TEXT_COLOR,
-                                     activestyle='none', width=22, height=20,
-                                     borderwidth=0, highlightthickness=0)
-        self.user_listbox.grid(row=1, column=0, sticky="nsew")
-        self.user_listbox.bind("<<ListboxSelect>>", self.on_user_select)
-        
-        # Kullanıcı ekleme paneli
-        add_frame = tk.Frame(user_panel, bg="#23272e", bd=0,
-                           highlightbackground="#444", highlightthickness=1, height=80)
-        add_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        add_frame.grid_propagate(False)
-        
-        tk.Label(add_frame, text="Kullanıcı Bağla", bg="#23272e", fg=TEXT_COLOR,
-                font=("Segoe UI", 11, "bold")).pack(side=tk.TOP, anchor="w", padx=10, pady=(8, 2))
-                
-        entry_row = tk.Frame(add_frame, bg="#23272e")
-        entry_row.pack(fill=tk.X, padx=10, pady=(0, 8))
-        
-        self.username_entry = tk.Entry(entry_row, width=14, font=("Segoe UI", 11),
-                                     bg=ENTRY_BG, fg=TEXT_COLOR, relief="flat",
+        self.username_entry = tk.Entry(user_frame, width=25,
+                                     font=("Segoe UI", 11),
+                                     bg=ENTRY_BG, fg=TEXT_COLOR,
+                                     relief="flat",
                                      insertbackground=TEXT_COLOR)
-        self.username_entry.pack(side=tk.LEFT, padx=(0, 8), fill=tk.X, expand=True)
+        self.username_entry.pack(fill=tk.X, padx=5, pady=(0, 5))
         
-        self.add_user_btn = tk.Button(entry_row, text="Bağlan",
-                                    command=self.add_user,
+        # Bağlantı türü seçimi
+        conn_frame = tk.LabelFrame(control_frame, text="🌐 Bağlantı Türü",
+                                  bg=PANEL_BG, fg=TEXT_COLOR,
+                                  font=("Segoe UI", 11, "bold"))
+        conn_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        # Bağlantı türü seçenekleri
+        connection_options = [
+            ("tcp", "TCP - Güvenli, sıralı iletişim"),
+            ("udp", "UDP - Hızlı, düşük gecikme"),
+            ("p2p", "P2P - Doğrudan düğüm iletişimi")
+        ]
+        
+        for value, text in connection_options:
+            tk.Radiobutton(conn_frame, text=text,
+                          variable=self.connection_type,
+                          value=value,
+                          bg=PANEL_BG, fg=TEXT_COLOR,
+                          selectcolor=PANEL_BG,
+                          activebackground=PANEL_BG,
+                          activeforeground=TEXT_COLOR,
+                          font=("Segoe UI", 10)).pack(anchor="w", padx=5, pady=2)
+        
+        # Sunucu kontrolleri
+        server_frame = tk.LabelFrame(control_frame, text="🖥️ Sunucu Kontrolü",
+                                    bg=PANEL_BG, fg=TEXT_COLOR,
+                                    font=("Segoe UI", 11, "bold"))
+        server_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        # Durum göstergeleri
+        status_frame = tk.Frame(server_frame, bg=PANEL_BG)
+        status_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Durum göstergesi fonksiyonu
+        def create_status_indicator(parent, text):
+            frame = tk.Frame(parent, bg=PANEL_BG)
+            frame.pack(fill=tk.X, pady=2)
+            
+            indicator = tk.Canvas(frame, width=15, height=15, bg=PANEL_BG, highlightthickness=0)
+            indicator.pack(side=tk.LEFT, padx=(0, 5))
+            indicator.create_oval(3, 3, 12, 12, fill=ERROR_COLOR, outline="#CC5555")
+            
+            label = tk.Label(frame, text=text,
+                           bg=PANEL_BG, fg=ERROR_COLOR,
+                           font=("Segoe UI", 10))
+            label.pack(side=tk.LEFT)
+            
+            return indicator, label
+        
+        self.tcp_indicator, self.tcp_status_label = create_status_indicator(status_frame, "TCP: Kapalı")
+        self.udp_indicator, self.udp_status_label = create_status_indicator(status_frame, "UDP: Kapalı")
+        self.p2p_indicator, self.p2p_status_label = create_status_indicator(status_frame, "P2P: Kapalı")
+        
+        # Kontrol butonları
+        button_frame = tk.Frame(server_frame, bg=PANEL_BG)
+        button_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.start_btn = tk.Button(button_frame, text="🚀 Başlat",
+                                  command=self.start_connection,
+                                  bg=SUCCESS_COLOR, fg=BUTTON_FG,
+                                  font=("Segoe UI", 11, "bold"),
+                                  relief="flat", width=12)
+        self.start_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.stop_btn = tk.Button(button_frame, text="⏹️ Durdur",
+                                 command=self.stop_connection,
+                                 bg=ERROR_COLOR, fg=BUTTON_FG,
+                                 font=("Segoe UI", 11, "bold"),
+                                 relief="flat", width=12)
+        self.stop_btn.pack(side=tk.LEFT)
+        
+        # İstemci bağlantısı
+        client_frame = tk.LabelFrame(control_frame, text="🔗 Bağlantı Kur",
+                                    bg=PANEL_BG, fg=TEXT_COLOR,
+                                    font=("Segoe UI", 11, "bold"))
+        client_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        # Host ve Port
+        addr_frame = tk.Frame(client_frame, bg=PANEL_BG)
+        addr_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        tk.Label(addr_frame, text="Host:", bg=PANEL_BG, fg=TEXT_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
+        self.host_entry = tk.Entry(addr_frame, width=12, bg=ENTRY_BG, fg=TEXT_COLOR, font=("Segoe UI", 10), relief="flat")
+        self.host_entry.pack(side=tk.LEFT, padx=5)
+        self.host_entry.insert(0, "localhost")
+        
+        tk.Label(addr_frame, text="Port:", bg=PANEL_BG, fg=TEXT_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(10, 0))
+        self.port_entry = tk.Entry(addr_frame, width=8, bg=ENTRY_BG, fg=TEXT_COLOR, font=("Segoe UI", 10), relief="flat")
+        self.port_entry.pack(side=tk.LEFT, padx=5)
+        self.port_entry.insert(0, "12345")
+        
+        # Bağlan butonu
+        self.connect_btn = tk.Button(client_frame, text="🔗 Bağlan",
+                                    command=self.connect_to_server,
                                     bg=BUTTON_BG, fg=BUTTON_FG,
                                     font=("Segoe UI", 10, "bold"),
-                                    relief="flat", bd=0,
-                                    activebackground=SECONDARY,
-                                    activeforeground=TEXT_COLOR)
-        self.add_user_btn.pack(side=tk.LEFT)
-
-        # Chat paneli - sekmeli yapı
-        chat_panel = tk.Frame(main, bg=BG_COLOR)
-        chat_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        chat_panel.grid_rowconfigure(0, weight=1)
-        chat_panel.grid_columnconfigure(0, weight=1)
+                                    relief="flat")
+        self.connect_btn.pack(pady=(5, 2))
         
-        self.notebook = ttk.Notebook(chat_panel)
-        self.notebook.grid(row=0, column=0, sticky="nsew", padx=0, pady=(0, 10))
+        # P2P için ek bilgi
+        p2p_info = tk.Label(client_frame, 
+                           text="💡 P2P için birden fazla farklı porta bağlanabilirsiniz",
+                           bg=PANEL_BG, fg="#CCCCCC",
+                           font=("Segoe UI", 8),
+                           wraplength=200)
+        p2p_info.pack(pady=(0, 5))
         
-        style = ttk.Style()
-        style.theme_use('default')
-        style.configure('TNotebook.Tab', background=CHAT_BG, font=("Segoe UI", 11),
-                       padding=[16, 8], foreground=TEXT_COLOR)
-        style.map('TNotebook.Tab', background=[('selected', ENTRY_BG)])
-        style.configure('TNotebook', background=BG_COLOR, borderwidth=0)
+        # Ağ araçları
+        tools_frame = tk.LabelFrame(control_frame, text="🛠️ Ağ Araçları",
+                                   bg=PANEL_BG, fg=TEXT_COLOR,
+                                   font=("Segoe UI", 11, "bold"))
+        tools_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         
-        # Sistem sekmesi
-        self.system_tab = tk.Frame(self.notebook, bg=CHAT_BG)
-        self.system_chat = tk.Text(self.system_tab, state='disabled', width=60, height=20,
-                                 bg=CHAT_BG, fg=TEXT_COLOR, font=("Segoe UI", 11),
-                                 relief="flat", wrap="word", borderwidth=0, highlightthickness=0)
-        self.system_chat.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.notebook.add(self.system_tab, text="Sistem")
+        self.network_map_btn = tk.Button(tools_frame, text="🗺️ Ağ Haritası",
+                                        command=self.show_network_map,
+                                        bg=SECONDARY, fg=BUTTON_FG,
+                                        font=("Segoe UI", 10, "bold"),
+                                        relief="flat")
+        self.network_map_btn.pack(fill=tk.X, padx=5, pady=(5, 2))
         
-        # Mitolojik chat sekmeleri
-        self.chat_areas = {}
-        for chat_name in MYTH_CHATS:
-            tab = tk.Frame(self.notebook, bg=CHAT_BG)
-            chat_area = tk.Text(tab, state='disabled', width=60, height=20,
-                              bg=CHAT_BG, fg=TEXT_COLOR, font=("Segoe UI", 11),
-                              relief="flat", wrap="word", borderwidth=0, highlightthickness=0)
-            chat_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            self.notebook.add(tab, text=chat_name)
-            self.chat_areas[chat_name] = chat_area
-            
-        # Mesaj kutusu (tüm sekmeler için ortak)
-        bottom = tk.Frame(chat_panel, bg=BG_COLOR)
-        bottom.grid(row=1, column=0, sticky="ew", padx=0, pady=(0, 10))
-        chat_panel.grid_rowconfigure(1, weight=0)
+        # Yardım butonu
+        help_btn = tk.Button(tools_frame, text="❓ P2P Nasıl Kullanılır?",
+                            command=self.show_p2p_help,
+                            bg=WARNING_COLOR, fg="black",
+                            font=("Segoe UI", 9, "bold"),
+                            relief="flat")
+        help_btn.pack(fill=tk.X, padx=5, pady=(2, 5))
+
+    def setup_users_panel(self, parent):
+        """Kullanıcılar panelini kur"""
+        users_frame = tk.Frame(parent, bg=PANEL_BG, relief="raised", bd=1)
+        users_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
         
-        entry_box = tk.Frame(bottom, bg=ENTRY_BG, bd=0,
-                           highlightbackground="#444", highlightthickness=1)
-        entry_box.pack(fill=tk.X, padx=0, pady=0)
+        # Başlık
+        tk.Label(users_frame, text="👥 Bağlı Kullanıcılar", 
+                bg=PANEL_BG, fg=TEXT_COLOR,
+                font=("Segoe UI", 14, "bold")).pack(pady=10)
         
-        self.message_entry = tk.Entry(entry_box, width=50, font=("Segoe UI", 11),
-                                    bg=ENTRY_BG, fg=TEXT_COLOR, relief="flat",
-                                    insertbackground=TEXT_COLOR, borderwidth=0)
-        self.message_entry.pack(side=tk.LEFT, fill=tk.X, expand=True,
-                              padx=(10, 10), pady=8)
+        # Kullanıcı sayısı
+        self.user_count_label = tk.Label(users_frame, text="Toplam: 0 kullanıcı",
+                                        bg=PANEL_BG, fg="#CCCCCC",
+                                        font=("Segoe UI", 10))
+        self.user_count_label.pack(pady=(0, 10))
         
-        self.send_btn = tk.Button(entry_box, text="Gönder",
-                                command=self.send_message,
-                                bg=BUTTON_BG, fg=BUTTON_FG,
-                                font=("Segoe UI", 10, "bold"),
-                                relief="flat", bd=0,
-                                activebackground=SECONDARY,
-                                activeforeground=TEXT_COLOR)
-        self.send_btn.pack(side=tk.LEFT, padx=(0, 10), pady=8)
+        # Kullanıcı listesi
+        listbox_frame = tk.Frame(users_frame, bg=PANEL_BG)
+        listbox_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         
-        self.message_entry.bind("<Return>", lambda e: self.send_message())
-        # Mesaj kutusu ve gönder butonu her zaman görünür, sadece aktiflikleri değişir
-        self.send_btn.config(state=tk.DISABLED)
-        self.message_entry.config(state=tk.DISABLED)
+        # Treeview kullanıcı listesi için
+        columns = ("username", "status", "connection")
+        self.user_tree = ttk.Treeview(listbox_frame, columns=columns, show="headings", height=15)
         
-        # RTT ölçümü için timer
-        self.rtt_timer = None
+        # Sütun başlıkları
+        self.user_tree.heading("username", text="Kullanıcı")
+        self.user_tree.heading("status", text="Durum")
+        self.user_tree.heading("connection", text="Bağlantı")
+        
+        # Sütun genişlikleri
+        self.user_tree.column("username", width=120)
+        self.user_tree.column("status", width=80)
+        self.user_tree.column("connection", width=80)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=self.user_tree.yview)
+        self.user_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.user_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Kullanıcı detayları
+        detail_frame = tk.LabelFrame(users_frame, text="📊 Kullanıcı Detayları",
+                                    bg=PANEL_BG, fg=TEXT_COLOR,
+                                    font=("Segoe UI", 11, "bold"))
+        detail_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        self.user_detail_text = tk.Text(detail_frame, 
+                                       bg=DARK_BG, fg=TEXT_COLOR,
+                                       font=("Segoe UI", 10),
+                                       height=6, width=30,
+                                       state=tk.DISABLED)
+        self.user_detail_text.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Treeview seçim olayı
+        self.user_tree.bind("<<TreeviewSelect>>", self.on_user_select)
 
-    def draw_server_indicator(self, canvas, active, is_tcp=True):
-        canvas.delete("all")
-        color = INDICATOR_ON if active else INDICATOR_OFF
-        canvas.create_oval(2, 2, 16, 16, fill=color, outline=color)
-        label = self.tcp_status_label if is_tcp else self.udp_status_label
-        label.config(text=f"{'TCP' if is_tcp else 'UDP'}: {'Açık' if active else 'Kapalı'}", 
-                    fg=INDICATOR_ON if active else INDICATOR_OFF)
-
-    def update_server_active(self):
-        tcp_alive = self.tcp_server_thread and self.tcp_server_thread.is_alive()
-        udp_alive = self.udp_server_thread and self.udp_server_thread.is_alive()
-        self.server_active = tcp_alive or udp_alive
-        # Mesaj gönderme alanlarını sunucu durumuna göre aktif/pasif yap
-        if self.server_active:
-            self.send_btn.config(state=tk.NORMAL)
-            self.message_entry.config(state=tk.NORMAL)
-        else:
-            self.send_btn.config(state=tk.DISABLED)
-            self.message_entry.config(state=tk.DISABLED)
-            
-        # Sunucu butonlarını güncelle
-        if tcp_alive:
-            self.udp_start_btn.config(state=tk.DISABLED)
-            self.tcp_start_btn.config(state=tk.DISABLED)
-            self.udp_stop_btn.config(state=tk.NORMAL)
-            self.tcp_stop_btn.config(state=tk.NORMAL)
-            # RTT göstergesini gizle
-            self.rtt_label.grid_remove()
-            if self.rtt_timer:
-                self.master.after_cancel(self.rtt_timer)
-                self.rtt_timer = None
-        elif udp_alive:
-            self.tcp_start_btn.config(state=tk.DISABLED)
-            self.udp_start_btn.config(state=tk.DISABLED)
-            self.tcp_stop_btn.config(state=tk.NORMAL)
-            self.udp_stop_btn.config(state=tk.NORMAL)
-            # RTT göstergesini göster ve ölçümü başlat
-            self.rtt_label.grid()
-            if not self.rtt_timer:
-                self.start_rtt_measurement()
-        else:
-            self.tcp_start_btn.config(state=tk.NORMAL)
-            self.udp_start_btn.config(state=tk.NORMAL)
-            self.tcp_stop_btn.config(state=tk.DISABLED)
-            self.udp_stop_btn.config(state=tk.DISABLED)
-            # RTT göstergesini gizle
-            self.rtt_label.grid_remove()
-            if self.rtt_timer:
-                self.master.after_cancel(self.rtt_timer)
-                self.rtt_timer = None
-
-    def start_rtt_measurement(self):
-        """UDP sunucu için RTT ölçümünü başlat"""
-        if not self.udp_server_instance or not self.udp_server_thread.is_alive():
-            return
-
-        # UDP istemci soketi oluştur
-        if not self.udp_client_socket:
-            try:
-                self.udp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                self.udp_client_socket.settimeout(1.0)  # 1 saniye timeout
-            except Exception as e:
-                print(f"[!] UDP soket oluşturma hatası: {e}")
-                return
-
-        # RTT ölçüm thread'ini başlat
-        if not self.rtt_thread or not self.rtt_thread.is_alive():
-            self.rtt_thread = threading.Thread(target=self._rtt_measurement_loop, daemon=True)
-            self.rtt_thread.start()
-
-    def _rtt_measurement_loop(self):
-        """RTT ölçüm döngüsü"""
-        while self.udp_server_thread and self.udp_server_thread.is_alive():
-            try:
-                # Ping mesajı gönder
-                ping_time = time.time()
-                ping_packet = protocol.build_packet(
-                    "GUI", "ping",
-                    extra_payload={"ping_time": str(ping_time)}
-                )
-                self.udp_client_socket.sendto(ping_packet, ("localhost", 12345))
-
-                # Pong yanıtını bekle
-                try:
-                    data, _ = self.udp_client_socket.recvfrom(protocol.MAX_PACKET_SIZE)
-                    pong_packet = protocol.parse_packet(data)
-                    
-                    if pong_packet and pong_packet["header"]["type"] == "pong":
-                        if "extra" in pong_packet["payload"] and "ping_time" in pong_packet["payload"]["extra"]:
-                            sent_time = float(pong_packet["payload"]["extra"]["ping_time"])
-                            rtt = (time.time() - sent_time) * 1000
-                            # GUI thread'inde RTT'yi güncelle
-                            self.master.after(0, self.update_rtt, rtt)
-                except socket.timeout:
-                    self.master.after(0, lambda: self.rtt_label.config(text="RTT: Timeout"))
-                except Exception as e:
-                    print(f"[!] RTT ölçüm hatası: {e}")
-                    self.master.after(0, lambda: self.rtt_label.config(text="RTT: Hata"))
-
-            except Exception as e:
-                print(f"[!] RTT gönderme hatası: {e}")
-                self.master.after(0, lambda: self.rtt_label.config(text="RTT: Hata"))
-
-            # 5 saniye bekle
-            time.sleep(5)
-
-    def update_rtt(self, rtt_ms):
-        """RTT göstergesini güncelle"""
-        self.last_rtt = rtt_ms
-        self.last_rtt_time = time.time()
-        self.rtt_label.config(text=f"RTT: {rtt_ms:.1f} ms")
-
-    def start_tcp_server(self):
-        self.update_server_active()
-        if self.tcp_server_thread and self.tcp_server_thread.is_alive():
-            messagebox.showwarning("Uyarı", "TCP sunucu zaten çalışıyor!")
-            return
-        if self.udp_server_thread and self.udp_server_thread.is_alive():
-            messagebox.showwarning("Uyarı", "Önce UDP sunucuyu kapatmalısınız!")
-            return
-        try:
-            self.tcp_server_thread = threading.Thread(target=tcp_server.start_server, daemon=True)
-            self.tcp_server_thread.start()
-            self.draw_server_indicator(self.tcp_status_indicator, True, True)
-            self.system_messages.append(f"☑ TCP sunucu başlatıldı (Protokol v{protocol.PROTOCOL_VERSION})")
-            self.update_system_chat()
-            self.update_server_active()
-        except Exception as e:
-            messagebox.showerror("Hata", f"TCP sunucu başlatılamadı: {e}")
-
-    def start_udp_server(self):
-        self.update_server_active()
-        if self.udp_server_thread and self.udp_server_thread.is_alive():
-            messagebox.showwarning("Uyarı", "UDP sunucu zaten çalışıyor!")
-            return
-        if self.tcp_server_thread and self.tcp_server_thread.is_alive():
-            messagebox.showwarning("Uyarı", "Önce TCP sunucuyu kapatmalısınız!")
-            return
-        try:
-            self.udp_server_instance = udp_server.UDPServer()
-            self.udp_server_thread = threading.Thread(target=self.udp_server_instance.start, daemon=True)
-            self.udp_server_thread.start()
-            self.draw_server_indicator(self.udp_status_indicator, True, False)
-            self.system_messages.append(f"☑ UDP sunucu başlatıldı (Protokol v{protocol.PROTOCOL_VERSION})")
-            self.update_system_chat()
-            self.update_server_active()
-        except Exception as e:
-            messagebox.showerror("Hata", f"UDP sunucu başlatılamadı: {e}")
-
-    def stop_tcp_server(self):
-        if not self.tcp_server_thread or not self.tcp_server_thread.is_alive():
-            messagebox.showwarning("Uyarı", "TCP sunucu zaten kapalı!")
-            return
-        try:
-            tcp_server.stop_server()
-            self.draw_server_indicator(self.tcp_status_indicator, False, True)
-            self.system_messages.append("🛑 TCP sunucu durduruldu.")
-            self.update_system_chat()
-            self.update_server_active()
-        except Exception as e:
-            messagebox.showerror("Hata", f"TCP sunucu durdurulamadı: {e}")
-
-    def stop_udp_server(self):
-        if not self.udp_server_thread or not self.udp_server_thread.is_alive():
-            messagebox.showwarning("Uyarı", "UDP sunucu zaten kapalı!")
-            return
-        try:
-            if self.udp_server_instance:
-                self.udp_server_instance.stop()
-            self.draw_server_indicator(self.udp_status_indicator, False, False)
-            self.system_messages.append("🛑 UDP sunucu durduruldu.")
-            self.update_system_chat()
-            self.update_server_active()
-        except Exception as e:
-            messagebox.showerror("Hata", f"UDP sunucu durdurulamadı: {e}")
-
-    def add_user(self):
-        self.update_server_active()
-        if not self.server_active:
-            messagebox.showerror("Sunucu Kapalı", "Sunucu kapalıyken kullanıcı eklenemez!")
-            return
+    def start_connection(self):
+        """Seçili bağlantı türünü başlat"""
         username = self.username_entry.get().strip()
         if not username:
-            messagebox.showerror("Hata", "Kullanıcı adı zorunlu!")
+            messagebox.showerror("Hata", "Lütfen kullanıcı adı girin!")
             return
-        if any(u[0] == username for u in self.users):
-            messagebox.showerror("Hata", "Bu kullanıcı zaten ekli!")
+        
+        # Aktif bağlantı var mı kontrol et
+        if self.tcp_server or self.udp_server or self.p2p_node:
+            messagebox.showwarning("Uyarı", "Zaten bir bağlantı türü aktif!\n\nÖnce 'Durdur' butonuna basıp mevcut bağlantıyı kapatın.")
+            return
+        
+        self.current_username = username
+        conn_type = self.connection_type.get()
+        
+        try:
+            if conn_type == "tcp":
+                self.start_tcp_server()
+            elif conn_type == "udp":
+                self.start_udp_server()
+            else:  # P2P
+                self.start_p2p_node()
+                
+        except Exception as e:
+            messagebox.showerror("Hata", f"Bağlantı başlatılamadı: {e}")
+
+    def stop_connection(self):
+        """Aktif bağlantıları durdur"""
+        try:
+            if self.tcp_server:
+                server.stop_server()
+                self.tcp_server = None
+                self.update_tcp_status(False)
+                self.add_system_message("🛑 TCP sunucu durduruldu")
+                
+            if self.udp_server:
+                self.udp_server.stop()
+                self.udp_server = None
+                self.update_udp_status(False)
+                self.add_system_message("🛑 UDP sunucu durduruldu")
+                
+            if self.p2p_node:
+                self.p2p_node.stop()
+                self.p2p_node = None
+                self.update_p2p_status(False)
+                self.add_system_message("🛑 P2P düğümü durduruldu")
+                
+            self.add_system_message("✅ Tüm bağlantılar güvenli şekilde durduruldu")
+            
+        except Exception as e:
+            messagebox.showerror("Hata", f"Bağlantı durdurulamadı: {e}")
+
+    def start_tcp_server(self):
+        """TCP sunucuyu başlat"""
+        try:
+            # TCP sunucuyu ayrı thread'de başlat
+            self.tcp_server_thread = threading.Thread(target=server.start_server, daemon=True)
+            self.tcp_server_thread.start()
+            self.tcp_server = True  # Sunucu çalışıyor bayrağı
+            self.update_tcp_status(True)
+            self.add_system_message(f"✅ TCP sunucu başlatıldı - Kullanıcı: {self.current_username}")
+            self.add_system_message("📡 TCP sunucu localhost:12345 adresinde dinliyor")
+        except Exception as e:
+            raise Exception(f"TCP başlatılamadı: {e}")
+
+    def start_udp_server(self):
+        """UDP sunucuyu başlat"""
+        try:
+            # UDP sunucuyu başlat
+            self.udp_server = udp_server.UDPServer()
+            self.udp_server_thread = threading.Thread(target=self.udp_server.start, daemon=True)
+            self.udp_server_thread.start()
+            self.update_udp_status(True)
+            self.add_system_message(f"✅ UDP sunucu başlatıldı - Kullanıcı: {self.current_username}")
+            self.add_system_message("📡 UDP sunucu localhost:12345 adresinde dinliyor")
+        except Exception as e:
+            raise Exception(f"UDP başlatılamadı: {e}")
+
+    def start_p2p_node(self):
+        """P2P düğümünü başlat"""
+        try:
+            self.p2p_node = P2PNode(username=self.current_username)
+            
+            # Mesaj callback'i ayarla
+            self.p2p_node.message_callback = self.on_p2p_message_received
+            
+            self.p2p_node.start()
+            self.update_p2p_status(True)
+            self.add_system_message(f"✅ P2P düğümü başlatıldı - Kullanıcı: {self.current_username}")
+            if hasattr(self.p2p_node, 'host') and hasattr(self.p2p_node, 'port'):
+                self.add_system_message(f"📍 Adres: {self.p2p_node.host}:{self.p2p_node.port}")
+            
+            # Kullanıcı listesini düzenli olarak güncelle
+            self.schedule_user_list_update()
+            
+        except Exception as e:
+            raise Exception(f"P2P başlatılamadı: {e}")
+
+    def on_p2p_message_received(self, message: str):
+        """P2P'den gelen mesajları chat'e ekle"""
+        try:
+            # Ana thread'de GUI güncelleme yapılmalı
+            self.master.after(0, lambda: self.add_chat_message(message))
+        except Exception as e:
+            print(f"[!] Mesaj GUI güncellemesi hatası: {e}")
+
+    def connect_to_server(self):
+        """Sunucuya bağlan"""
+        host = self.host_entry.get().strip()
+        port_str = self.port_entry.get().strip()
+        
+        if not host or not port_str:
+            messagebox.showerror("Hata", "Host ve port bilgilerini girin!")
             return
             
-        # Kullanıcıyı ekle (versiyon bilgisi ile)
-        self.users.append((username, True, protocol.PROTOCOL_VERSION))
-        self.update_user_list()
-        self.username_entry.delete(0, tk.END)
-        self.active_user = username
+        if not self.current_username:
+            messagebox.showerror("Hata", "Önce bir bağlantı türü başlatın!")
+            return
+            
+        try:
+            port = int(port_str)
+            conn_type = self.connection_type.get()
+            
+            if conn_type == "p2p":
+                if not self.p2p_node:
+                    messagebox.showerror("Hata", "Önce P2P düğümünü başlatın!")
+                    return
+                    
+                # Kendine bağlanmayı engelle
+                if host in ["localhost", "127.0.0.1"] and port == self.p2p_node.port:
+                    messagebox.showwarning("Uyarı", f"Kendi adresinize bağlanamazsınız!\n\nSizin adresiniz: {self.p2p_node.host}:{self.p2p_node.port}\nFarklı bir port kullanın.")
+                    return
+                
+                self.add_system_message(f"🔍 P2P bağlantısı deneniyor: {host}:{port}")
+                success = self.p2p_node.connect_to_peer(host, port, "Bilinmiyor")
+                
+                if success:
+                    self.add_system_message(f"✅ P2P bağlantısı başarılı: {host}:{port}")
+                    self.update_user_list()
+                else:
+                    self.add_system_message(f"❌ P2P bağlantısı başarısız: {host}:{port}")
+                    messagebox.showerror("Hata", f"P2P bağlantısı kurulamadı!\n\nKontrol edin:\n• Hedef adresteki P2P düğümü çalışıyor mu?\n• Port numarası doğru mu?\n• Ağ bağlantısı var mı?")
+            else:
+                self.add_system_message(f"🔗 {conn_type.upper()} bağlantısı deneniyor: {host}:{port}")
+                messagebox.showinfo("Bilgi", f"{conn_type.upper()} istemci bağlantısı henüz implement edilmedi.")
+                
+        except ValueError:
+            messagebox.showerror("Hata", "Geçersiz port numarası!")
+        except Exception as e:
+            messagebox.showerror("Hata", f"Bağlantı hatası: {e}")
+
+    def show_network_map(self):
+        """Ağ haritasını göster"""
+        if not self.p2p_node:
+            messagebox.showwarning("Uyarı", "P2P düğümü çalışmıyor!")
+            return
+            
+        # Ana thread'de güvenli çalışacak şekilde pencere aç
+        self.master.after(0, self._open_network_window)
+
+    def _open_network_window(self):
+        """Ağ haritası penceresini aç"""
+        if self.network_window:
+            self.network_window.lift()
+            return
+            
+        self.network_window = tk.Toplevel(self.master)
+        self.network_window.title("🗺️ P2P Ağ Haritası")
+        self.network_window.geometry("800x600")
+        self.network_window.configure(bg=DARK_BG)
         
-        # Sistem sekmesine mesaj
-        self.system_messages.append(f"👤 {username} bağlandı (Protokol v{protocol.PROTOCOL_VERSION})")
-        self.update_system_chat()
+        # Matplotlib figürü
+        fig = plt.Figure(figsize=(10, 6), dpi=100, facecolor=DARK_BG)
+        ax = fig.add_subplot(111, facecolor=DARK_BG)
+        
+        # Canvas
+        canvas = FigureCanvasTkAgg(fig, master=self.network_window)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Grafik çiz
+        if self.p2p_node and hasattr(self.p2p_node, 'network_graph'):
+            import networkx as nx
+            try:
+                graph = self.p2p_node.network_graph
+                
+                if len(graph.nodes()) > 0:
+                    # Node'lar varsa çiz
+                    pos = nx.spring_layout(graph, k=2, iterations=50)
+                    
+                    # Node'ları çiz
+                    nx.draw_networkx_nodes(graph, pos, ax=ax,
+                                         node_color='lightblue', 
+                                         node_size=1500,
+                                         alpha=0.8)
+                    
+                    # Bağlantıları çiz
+                    if len(graph.edges()) > 0:
+                        nx.draw_networkx_edges(graph, pos, ax=ax,
+                                             edge_color='gray', 
+                                             width=3,
+                                             alpha=0.6)
+                    
+                    # Etiketleri çiz
+                    nx.draw_networkx_labels(graph, pos, ax=ax,
+                                          font_size=10, 
+                                          font_color='black',
+                                          font_weight='bold')
+                    
+                    # Bilgi metni
+                    info_text = f"Düğümler: {len(graph.nodes())}\nBağlantılar: {len(graph.edges())}"
+                    ax.text(0.02, 0.98, info_text, transform=ax.transAxes, 
+                           verticalalignment='top', fontsize=10,
+                           bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.7))
+                else:
+                    # Hiç node yok
+                    ax.text(0.5, 0.5, f"P2P Düğümü: {self.current_username}\nPort: {self.p2p_node.port}\n\nHenüz bağlantı yok", 
+                           transform=ax.transAxes, ha='center', va='center',
+                           fontsize=12, color='blue',
+                           bbox=dict(boxstyle='round,pad=1', facecolor='lightblue', alpha=0.8))
+                           
+            except Exception as e:
+                ax.text(0.5, 0.5, f"Grafik çizilemedi:\n{e}", 
+                       transform=ax.transAxes, ha='center', va='center',
+                       color='red', fontsize=10)
+        else:
+            ax.text(0.5, 0.5, "P2P düğümü çalışmıyor", 
+                   transform=ax.transAxes, ha='center', va='center',
+                   color='red', fontsize=12)
+        
+        ax.set_title("P2P Ağ Topolojisi", color=TEXT_COLOR, fontsize=14)
+        ax.axis('off')
+        canvas.draw()
+        
+        # Pencere kapatıldığında
+        def on_closing():
+            self.network_window.destroy()
+            self.network_window = None
+        
+        self.network_window.protocol("WM_DELETE_WINDOW", on_closing)
 
-    def on_user_select(self, event):
-        selection = self.user_listbox.curselection()
-        if selection:
-            username = self.user_listbox.get(selection[0])
-            username = username.split(' ', 1)[1].split(' (')[0]  # Versiyon bilgisini ayır
-            self.active_user = username
-            # İlgili chat sekmesine geç
-            for i in range(self.notebook.index('end')):
-                if self.notebook.tab(i, 'text') == username:
-                    self.notebook.select(i)
-                    break
+    def show_p2p_help(self):
+        """P2P kullanım talimatlarını göster"""
+        help_text = """
+🌐 P2P (Peer-to-Peer) Nasıl Kullanılır?
 
-    def send_message(self):
-        """Mesaj gönderme"""
-        self.update_server_active()
-        if not self.server_active:
-            messagebox.showerror("Sunucu Kapalı", "Sunucu kapalıyken mesaj gönderilemez!")
-            return
+📋 ADIM ADIM REHBERİ:
 
-        message = self.message_entry.get().strip()
-        if not message or not self.active_user:
-            return
+1️⃣ İLK DÜĞÜMÜ BAŞLATIN:
+   • Kullanıcı adı: "Ali" 
+   • P2P seçin ve "Başlat" a basın
+   • Not edin: Port numarası (örn: 54321)
 
-        tab_idx = self.notebook.index(self.notebook.select())
-        tab_name = self.notebook.tab(tab_idx, 'text')
-        if tab_name == "Sistem":
-            messagebox.showinfo("Bilgi", "Sistem sekmesinde mesaj gönderilemez.")
-            return
+2️⃣ İKİNCİ DÜĞÜMÜ BAŞLATIN:
+   • Yeni pencerede uygulamayı açın
+   • Kullanıcı adı: "Veli"
+   • P2P seçin ve "Başlat" a basın
+   • Port numarası farklı olacak (örn: 54322)
 
-        chat_area = self.chat_areas.get(tab_name)
-        if chat_area:
-            # Mesajı göster
-            chat_area.config(state='normal')
-            chat_area.insert(tk.END, f"{self.active_user}: {message}\n")
-            chat_area.config(state='disabled')
-            chat_area.yview(tk.END)
+3️⃣ BAĞLANTIN:
+   • Host: localhost
+   • Port: 54321 (Ali'nin portu)
+   • "Bağlan" a basın
 
-            # Mesajı kaydet
-            self.chat_messages[tab_name].append(f"{self.active_user}: {message}")
+4️⃣ ÜÇÜNCÜ DÜĞÜM EKLEYİN:
+   • Üçüncü pencerede "Ayşe" ile başlayın
+   • Ali'ye VEYA Veli'ye bağlanın
+   • Her iki yönden de bağlanabilirsiniz
 
-            # UDP sunucu aktifse, mesajı gönder
-            if self.udp_server_thread and self.udp_server_thread.is_alive():
-                try:
-                    # UDP istemci soketi oluştur (eğer yoksa)
-                    if not self.udp_client_socket:
-                        self.udp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        self.udp_client_socket.settimeout(1.0)
+🗺️ AĞ HARİTASINDA GÖRECEK.LERİNİZ:
+   • Mavi daireler = Kullanıcılar
+   • Gri çizgiler = Bağlantılar
+   • İsimler = Kullanıcı adları
 
-                    # Mesaj paketini oluştur
-                    packet = protocol.build_packet(self.active_user, "message", message)
+💬 MESAJ GÖNDERME:
+   • Alt kısımdaki mesaj kutusuna yazın
+   • Enter'a basın veya "Gönder" e tıklayın
+   • Tüm bağlı düğümlere yayınlanır
 
-                    # Paket boyutu kontrolü ve parçalama
-                    if len(packet) > protocol.MAX_PACKET_SIZE:
-                        print("[*] Mesaj parçalanıyor...")
-                        try:
-                            fragments = protocol.fragmenter.fragment_packet(packet)
-                            for fragment in fragments:
-                                self.udp_client_socket.sendto(fragment, ("localhost", 12345))
-                                time.sleep(0.1)  # Parçalar arası kısa bekleme
-                            messagebox.showinfo("Bilgi", f"Uzun mesaj parçalara bölünüp gönderildi. ({len(fragments)} parça)")
-                        except Exception as e:
-                            print(f"[!] Mesaj parçalama/gönderme hatası: {e}")
-                            messagebox.showerror("Hata", f"Büyük mesaj gönderilemedi: {e}")
-                    else:
-                        self.udp_client_socket.sendto(packet, ("localhost", 12345))
+⚠️ DİKKAT:
+   • Her düğüm farklı portta çalışmalı
+   • Sadece bir bağlantı türü aktif olabilir
+   • Localhost yerine gerçek IP de kullanabilirsiniz
+        """
+        
+        help_window = tk.Toplevel(self.master)
+        help_window.title("P2P Kullanım Kılavuzu")
+        help_window.geometry("600x500")
+        help_window.configure(bg=DARK_BG)
+        
+        text_widget = scrolledtext.ScrolledText(
+            help_window,
+            bg=DARK_BG, fg=TEXT_COLOR,
+            font=("Segoe UI", 10),
+            wrap=tk.WORD,
+            padx=10, pady=10
+        )
+        text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        text_widget.insert(tk.END, help_text)
+        text_widget.config(state=tk.DISABLED)
 
-                except Exception as e:
-                    print(f"[!] UDP mesaj gönderme hatası: {e}")
-                    messagebox.showerror("Hata", f"Mesaj gönderilemedi: {e}")
+    def update_tcp_status(self, is_active: bool):
+        """TCP durum göstergesini güncelle"""
+        color = SUCCESS_COLOR if is_active else ERROR_COLOR
+        text = "TCP: Açık" if is_active else "TCP: Kapalı"
+        
+        self.tcp_indicator.delete("all")
+        self.tcp_indicator.create_oval(3, 3, 12, 12, fill=color, outline="#FFFFFF")
+        self.tcp_status_label.config(text=text, fg=color)
 
-        self.message_entry.delete(0, tk.END)
+    def update_udp_status(self, is_active: bool):
+        """UDP durum göstergesini güncelle"""
+        color = SUCCESS_COLOR if is_active else ERROR_COLOR
+        text = "UDP: Açık" if is_active else "UDP: Kapalı"
+        
+        self.udp_indicator.delete("all")
+        self.udp_indicator.create_oval(3, 3, 12, 12, fill=color, outline="#FFFFFF")
+        self.udp_status_label.config(text=text, fg=color)
 
-    def update_system_chat(self):
-        self.system_chat.config(state='normal')
-        self.system_chat.delete(1.0, tk.END)
-        for msg in self.system_messages:
-            self.system_chat.insert(tk.END, f"{msg}\n")
-        self.system_chat.config(state='disabled')
-        self.system_chat.yview(tk.END)
+    def update_p2p_status(self, is_active: bool):
+        """P2P durum göstergesini güncelle"""
+        color = SUCCESS_COLOR if is_active else ERROR_COLOR
+        text = "P2P: Açık" if is_active else "P2P: Kapalı"
+        
+        self.p2p_indicator.delete("all")
+        self.p2p_indicator.create_oval(3, 3, 12, 12, fill=color, outline="#FFFFFF")
+        self.p2p_status_label.config(text=text, fg=color)
 
     def update_user_list(self):
-        self.user_listbox.delete(0, tk.END)
-        for username, online, version in self.users:
-            icon = USER_ONLINE if online else USER_OFFLINE
-            self.user_listbox.insert(tk.END, f"{icon} {username} (v{version})")
-
-    def on_closing(self):
-        """Uygulama kapatılırken kaynakları temizle"""
-        if self.tcp_server_thread and self.tcp_server_thread.is_alive():
-            self.stop_tcp_server()
-        if self.udp_server_thread and self.udp_server_thread.is_alive():
-            self.stop_udp_server()
-        if self.rtt_thread and self.rtt_thread.is_alive():
-            self.rtt_thread = None
-        if self.udp_client_socket:
+        """Kullanıcı listesini güncelle"""
+        # Mevcut öğeleri temizle
+        for item in self.user_tree.get_children():
+            self.user_tree.delete(item)
+            
+        user_count = 0
+        
+        # P2P kullanıcıları ekle
+        if self.p2p_node and hasattr(self.p2p_node, 'peers'):
             try:
-                self.udp_client_socket.close()
-            except:
-                pass
-        if self.rtt_timer:
-            self.master.after_cancel(self.rtt_timer)
-        self.master.destroy()
+                # Kendini ekle
+                self.user_tree.insert("", "end", values=(
+                    f"{self.current_username} (Sen)", 
+                    "🟢 Aktif", 
+                    f"P2P:{self.p2p_node.port}"
+                ))
+                user_count += 1
+                
+                # Diğer peer'ları ekle
+                for peer_username, peer_info in self.p2p_node.peers.items():
+                    # PeerInfo objesi ise
+                    if hasattr(peer_info, 'username'):
+                        username = peer_info.username
+                        is_active = peer_info.is_active
+                        host = peer_info.host
+                        port = peer_info.port
+                    else:
+                        # Dict ise (eski format)
+                        username = peer_info.get('username', peer_username)
+                        is_active = peer_info.get('is_active', True)
+                        host = peer_info.get('host', 'unknown')
+                        port = peer_info.get('port', 0)
+                    
+                    status = "🟢 Aktif" if is_active else "🔴 Pasif"
+                    connection = f"P2P:{port}"
+                    
+                    self.user_tree.insert("", "end", values=(username, status, connection))
+                    user_count += 1
+                    
+            except Exception as e:
+                self.add_system_message(f"❌ Kullanıcı listesi güncelleme hatası: {e}")
+        
+        # Kullanıcı sayısını güncelle
+        self.user_count_label.config(text=f"Toplam: {user_count} kullanıcı")
 
+    def schedule_user_list_update(self):
+        """Kullanıcı listesi güncellemesini zamanla"""
+        if self.p2p_node:
+            self.update_user_list()
+            self.check_p2p_connection_health()
+            self.master.after(5000, self.schedule_user_list_update)  # 5 saniyede bir güncelle
+            
+    def check_p2p_connection_health(self):
+        """P2P bağlantısının sağlığını kontrol et"""
+        if not self.p2p_node:
+            self.update_p2p_status(False)
+            return
+            
+        try:
+            # P2P node'un çalışıp çalışmadığını kontrol et
+            if not self.p2p_node.is_running:
+                self.update_p2p_status(False)
+                self.add_system_message("⚠️ P2P düğümü çalışmıyor - bağlantı durduruluyor")
+                return
+                
+            # Aktif peer sayısını kontrol et
+            status = self.p2p_node.get_network_status()
+            active_peers = status.get("active_peers", 0)
+            
+            # Hiç aktif peer yoksa uyarı ver ama yeşil kal (çünkü node çalışıyor)
+            if active_peers == 0:
+                self.update_p2p_status(True)  # Node çalışıyor ama peer yok
+            else:
+                self.update_p2p_status(True)
+                
+            # Durum mesajları
+            if active_peers == 0:
+                self.add_system_message(f"🔍 P2P aktif ama bağlı peer yok (Port: {self.p2p_node.port})")
+            else:
+                self.add_system_message(f"📡 P2P bağlantısı sağlıklı - {active_peers} aktif peer")
+                
+        except Exception as e:
+            self.update_p2p_status(False)
+            self.add_system_message(f"❌ P2P sağlık kontrolü başarısız: {e}")
+
+    def on_user_select(self, event):
+        """Kullanıcı seçildiğinde detayları göster"""
+        selection = self.user_tree.selection()
+        if not selection:
+            return
+            
+        item = self.user_tree.item(selection[0])
+        values = item['values']
+        
+        if values:
+            username, status, connection = values
+            
+            detail_text = f"👤 Kullanıcı: {username}\n"
+            detail_text += f"🔗 Bağlantı: {connection}\n"
+            detail_text += f"📊 Durum: {status}\n"
+            detail_text += f"⏰ Son görülme: Az önce\n"
+            
+            if self.p2p_node:
+                detail_text += f"📡 RTT: -- ms\n"
+                detail_text += f"📤 Gönderilen: -- paket\n"
+                detail_text += f"📥 Alınan: -- paket"
+            
+            self.user_detail_text.config(state=tk.NORMAL)
+            self.user_detail_text.delete(1.0, tk.END)
+            self.user_detail_text.insert(1.0, detail_text)
+            self.user_detail_text.config(state=tk.DISABLED)
+
+    def send_message(self, event=None):
+        """Mesaj gönder"""
+        message = self.message_entry.get().strip()
+        if not message:
+            return
+            
+        if not self.current_username:
+            messagebox.showerror("Hata", "Önce bağlantı kurun!")
+            return
+            
+        # Mesajı chat'e ekle
+        self.add_chat_message(f"{self.current_username}: {message}")
+        
+        # Mesajı gönder (bağlantı türüne göre)
+        try:
+            if self.p2p_node:
+                sent_count = self.p2p_node.broadcast_message(message)
+                if sent_count == 0:
+                    self.add_system_message("⚠️ Henüz bağlı peer yok")
+                else:
+                    self.add_system_message(f"📤 Mesaj {sent_count} peer'a gönderildi")
+        except Exception as e:
+            self.add_system_message(f"❌ Mesaj gönderilemedi: {e}")
+        
+        self.message_entry.delete(0, tk.END)
+
+    def add_chat_message(self, message: str):
+        """Chat mesajı ekle"""
+        self.chat_display.config(state=tk.NORMAL)
+        timestamp = time.strftime("%H:%M:%S")
+        self.chat_display.insert(tk.END, f"[{timestamp}] {message}\n")
+        self.chat_display.see(tk.END)
+        self.chat_display.config(state=tk.DISABLED)
+
+    def add_system_message(self, message: str):
+        """Sistem mesajı ekle"""
+        timestamp = time.strftime("%H:%M:%S")
+        full_message = f"[{timestamp}] {message}"
+        
+        self.system_display.config(state=tk.NORMAL)
+        self.system_display.insert(tk.END, f"{full_message}\n")
+        self.system_display.see(tk.END)
+        self.system_display.config(state=tk.DISABLED)
+
+# Ana uygulama
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = CommonChatApp(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_closing)
-    root.mainloop() 
+    try:
+        root = tk.Tk()
+        app = ModernChatApp(root)
+        root.mainloop()
+    except Exception as e:
+        print(f"Uygulama başlatma hatası: {e}")
+        input("Çıkmak için Enter'a basın...") 
