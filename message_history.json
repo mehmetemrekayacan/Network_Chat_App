@@ -1,0 +1,578 @@
+[
+  {
+    "timestamp": "2025-06-06T10:23:47.449504",
+    "message": "[10:23:47] 🧹 Mesaj geçmişi temizlendi",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:23:47.726172",
+    "message": "[10:23:47] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:23:52.731634",
+    "message": "[10:23:52] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:23:57.733371",
+    "message": "[10:23:57] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:02.735863",
+    "message": "[10:24:02] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:07.749690",
+    "message": "[10:24:07] 🔍 P2P aktif ama bağlı peer yok (Port: 60269)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:12.760680",
+    "message": "[10:24:12] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:17.764573",
+    "message": "[10:24:17] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:22.781790",
+    "message": "[10:24:22] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:27.790042",
+    "message": "[10:24:27] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:32.803734",
+    "message": "[10:24:32] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:37.496959",
+    "message": "veli: asda",
+    "type": "chat",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:37.500729",
+    "message": "[10:24:37] 📤 Mesaj 1 peer'a gönderildi",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:37.809798",
+    "message": "[10:24:37] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:42.825043",
+    "message": "[10:24:42] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:47.835853",
+    "message": "[10:24:47] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:52.839421",
+    "message": "[10:24:52] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:24:57.847478",
+    "message": "[10:24:57] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:02.857748",
+    "message": "[10:25:02] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:07.863680",
+    "message": "[10:25:07] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:12.879166",
+    "message": "[10:25:12] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:17.882481",
+    "message": "[10:25:17] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:22.892413",
+    "message": "[10:25:22] 🔍 P2P aktif ama bağlı peer yok (Port: 60269)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:27.906683",
+    "message": "[10:25:27] 🔍 P2P aktif ama bağlı peer yok (Port: 60269)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:32.922815",
+    "message": "[10:25:32] 🔍 P2P aktif ama bağlı peer yok (Port: 60269)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:37.927836",
+    "message": "[10:25:37] 🔍 P2P aktif ama bağlı peer yok (Port: 60269)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:42.934121",
+    "message": "[10:25:42] 🔍 P2P aktif ama bağlı peer yok (Port: 60269)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:47.949029",
+    "message": "[10:25:47] 🔍 P2P aktif ama bağlı peer yok (Port: 60269)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:25:52.953350",
+    "message": "[10:25:52] 🔍 P2P aktif ama bağlı peer yok (Port: 60269)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:26:43.606734",
+    "message": "[10:26:43] ✅ P2P düğümü başlatıldı - Kullanıcı: veli",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:26:43.613669",
+    "message": "[10:26:43] 📍 Adres: localhost:52351",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:26:43.620588",
+    "message": "[10:26:43] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:26:48.622232",
+    "message": "[10:26:48] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:26:53.178535",
+    "message": "[10:26:53] 🔍 P2P bağlantısı deneniyor: localhost:55810",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:26:53.281703",
+    "message": "[10:26:53] ✅ P2P bağlantısı başarılı: localhost:55810",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:26:53.641092",
+    "message": "[10:26:53] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:26:58.652956",
+    "message": "[10:26:58] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:03.661423",
+    "message": "[10:27:03] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:08.677291",
+    "message": "[10:27:08] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:13.692489",
+    "message": "[10:27:13] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:18.702913",
+    "message": "[10:27:18] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:23.712166",
+    "message": "[10:27:23] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:28.729010",
+    "message": "[10:27:28] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:33.733759",
+    "message": "[10:27:33] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:38.741406",
+    "message": "[10:27:38] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:43.749190",
+    "message": "[10:27:43] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:48.757960",
+    "message": "[10:27:48] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:53.762328",
+    "message": "[10:27:53] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:27:58.766922",
+    "message": "[10:27:58] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:03.784593",
+    "message": "[10:28:03] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:08.793818",
+    "message": "[10:28:08] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:13.798434",
+    "message": "[10:28:13] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:18.805483",
+    "message": "[10:28:18] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:23.812922",
+    "message": "[10:28:23] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:28.818555",
+    "message": "[10:28:28] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:33.823981",
+    "message": "[10:28:33] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:38.833546",
+    "message": "[10:28:38] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:43.839346",
+    "message": "[10:28:43] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:48.843205",
+    "message": "[10:28:48] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:53.853983",
+    "message": "[10:28:53] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:28:58.868816",
+    "message": "[10:28:58] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:29:03.880376",
+    "message": "[10:29:03] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:29:08.897910",
+    "message": "[10:29:08] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:29:13.902641",
+    "message": "[10:29:13] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:29:18.915981",
+    "message": "[10:29:18] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:29:23.930131",
+    "message": "[10:29:23] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:29:28.941844",
+    "message": "[10:29:28] 🔍 P2P aktif ama bağlı peer yok (Port: 52351)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:29:44.605326",
+    "message": "[10:29:44] 🎨 Tema değiştirildi: Açık mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:47.444761",
+    "message": "[10:29:47] 🎨 Tema değiştirildi: Koyu mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:48.166006",
+    "message": "[10:29:48] 🎨 Tema değiştirildi: Açık mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:49.118814",
+    "message": "[10:29:49] 🎨 Tema değiştirildi: Koyu mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:49.576780",
+    "message": "[10:29:49] 🎨 Tema değiştirildi: Açık mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:50.164506",
+    "message": "[10:29:50] 🎨 Tema değiştirildi: Koyu mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:50.633356",
+    "message": "[10:29:50] 🎨 Tema değiştirildi: Açık mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:51.482909",
+    "message": "[10:29:51] 🎨 Tema değiştirildi: Koyu mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:55.635450",
+    "message": "[10:29:55] 🎨 Tema değiştirildi: Açık mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:57.048963",
+    "message": "[10:29:57] 🎨 Tema değiştirildi: Koyu mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:57.479171",
+    "message": "[10:29:57] 🎨 Tema değiştirildi: Açık mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:29:59.057017",
+    "message": "[10:29:59] 🎨 Tema değiştirildi: Koyu mod",
+    "type": "system",
+    "username": ""
+  },
+  {
+    "timestamp": "2025-06-06T10:30:55.223989",
+    "message": "[10:30:55] ✅ P2P düğümü başlatıldı - Kullanıcı: ali",
+    "type": "system",
+    "username": "ali"
+  },
+  {
+    "timestamp": "2025-06-06T10:30:55.235274",
+    "message": "[10:30:55] 📍 Adres: localhost:53873",
+    "type": "system",
+    "username": "ali"
+  },
+  {
+    "timestamp": "2025-06-06T10:30:55.243879",
+    "message": "[10:30:55] 🔍 P2P aktif ama bağlı peer yok (Port: 53873)",
+    "type": "system",
+    "username": "ali"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:00.249104",
+    "message": "[10:31:00] 🔍 P2P aktif ama bağlı peer yok (Port: 53873)",
+    "type": "system",
+    "username": "ali"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:04.128568",
+    "message": "[10:31:04] ✅ P2P düğümü başlatıldı - Kullanıcı: veli",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:04.138637",
+    "message": "[10:31:04] 📍 Adres: localhost:57021",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:04.146740",
+    "message": "[10:31:04] 🔍 P2P aktif ama bağlı peer yok (Port: 57021)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:09.149559",
+    "message": "[10:31:09] 🔍 P2P aktif ama bağlı peer yok (Port: 57021)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:14.154884",
+    "message": "[10:31:14] 🔍 P2P aktif ama bağlı peer yok (Port: 57021)",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:15.436399",
+    "message": "[10:31:15] 🔍 P2P bağlantısı deneniyor: localhost:53873",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:15.539653",
+    "message": "[10:31:15] ✅ P2P bağlantısı başarılı: localhost:53873",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:18.968068",
+    "message": "veli: dasdasd",
+    "type": "chat",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:18.974191",
+    "message": "[10:31:18] 📤 Mesaj 1 peer'a gönderildi",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:19.166384",
+    "message": "[10:31:19] 📡 P2P bağlantısı sağlıklı - 1 aktif peer",
+    "type": "system",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:21.461430",
+    "message": "ali: asdasd",
+    "type": "chat",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:24.123525",
+    "message": "[Sistem] ali ağdan ayrıldı",
+    "type": "chat",
+    "username": "veli"
+  },
+  {
+    "timestamp": "2025-06-06T10:31:24.180404",
+    "message": "[10:31:24] 🔍 P2P aktif ama bağlı peer yok (Port: 57021)",
+    "type": "system",
+    "username": "veli"
+  }
+]

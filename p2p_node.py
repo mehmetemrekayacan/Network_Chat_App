@@ -107,6 +107,23 @@ class P2PNode:
         
     def stop(self):
         """P2P düğümünü durdur"""
+        print(f"[!] P2P düğümü durduruluyor: {self.username}")
+        
+        # Tüm peer'lara disconnect mesajı gönder
+        if self.socket and self.is_running:
+            disconnect_packet = build_packet(
+                self.username, "p2p_disconnect",
+                extra_payload={"username": self.username}
+            )
+            
+            with self.peers_lock:
+                for peer_username, peer_info in self.peers.items():
+                    try:
+                        self.socket.sendto(disconnect_packet, (peer_info.host, peer_info.port))
+                        print(f"[+] Disconnect mesajı gönderildi: {peer_username}")
+                    except Exception as e:
+                        print(f"[!] Disconnect mesajı gönderilemedi ({peer_username}): {e}")
+        
         self.is_running = False
         self.is_visualization_running = False
         
@@ -117,6 +134,8 @@ class P2PNode:
             self.network_window.quit()
             self.network_window.destroy()
             self.network_window = None
+            
+        print(f"[✓] P2P düğümü durduruldu: {self.username}")
         
     def connect_to_peer(self, peer_host: str, peer_port: int, peer_username: str) -> bool:
         """Yeni bir eş düğüme bağlan"""
@@ -481,8 +500,24 @@ class P2PNode:
             # Bağlantı kesme
             if "extra" in packet["payload"]:
                 peer_username = packet["payload"]["extra"].get("username")
-                if peer_username:
-                    self.disconnect_from_peer(peer_username)
+                if peer_username and peer_username in self.peers:
+                    print(f"[!] {peer_username} bağlantıyı kesti")
+                    with self.peers_lock:
+                        if peer_username in self.peers:
+                            del self.peers[peer_username]
+                        if peer_username in self.connections:
+                            del self.connections[peer_username]
+                        if peer_username in self.rtt_measurements:
+                            del self.rtt_measurements[peer_username]
+                            
+                    # Graf'tan düğümü kaldır
+                    with self.graph_lock:
+                        if self.network_graph.has_node(peer_username):
+                            self.network_graph.remove_node(peer_username)
+                            
+                    # GUI callback varsa bildir
+                    if hasattr(self, 'message_callback') and self.message_callback:
+                        self.message_callback(f"[Sistem] {peer_username} ağdan ayrıldı")
                     
         elif msg_type == "p2p_ping":
             # Ping yanıtı
