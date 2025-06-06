@@ -116,8 +116,7 @@ MESSAGE_TYPES = {
     "p2p_ping": 0x12,
     "p2p_pong": 0x13,
     "p2p_status": 0x14,
-    "p2p_topology": 0x15,
-    "p2p_message_ack": 0x16
+    "p2p_topology": 0x15
 }
 
 ERROR_CODES = {
