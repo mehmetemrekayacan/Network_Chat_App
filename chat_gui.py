@@ -50,6 +50,7 @@ class SimpleChatApp:
         
         # Kullanıcı verileri
         self.current_username = ""
+        self.connected_users = []  # Bağlı kullanıcılar listesi
         
         # UI bileşenleri
         self.connection_type = tk.StringVar(value="tcp")
@@ -162,11 +163,13 @@ class SimpleChatApp:
         
         tk.Radiobutton(conn_frame, text="TCP - Güvenli",
                       variable=self.connection_type, value="tcp",
-                      bg=THEME["panel_bg"], fg=THEME["text_color"]).pack(anchor="w", padx=5)
+                      bg=THEME["panel_bg"], fg=THEME["text_color"],
+                      selectcolor=THEME["button_bg"], activebackground=THEME["panel_bg"]).pack(anchor="w", padx=5)
         
         tk.Radiobutton(conn_frame, text="UDP - Hızlı",
                       variable=self.connection_type, value="udp",
-                      bg=THEME["panel_bg"], fg=THEME["text_color"]).pack(anchor="w", padx=5)
+                      bg=THEME["panel_bg"], fg=THEME["text_color"],
+                      selectcolor=THEME["button_bg"], activebackground=THEME["panel_bg"]).pack(anchor="w", padx=5)
         
         # Port bilgisi ve giriş
         port_sub_frame = tk.Frame(conn_frame, bg=THEME["panel_bg"])
@@ -232,43 +235,26 @@ class SimpleChatApp:
                                      bg=THEME["button_bg"], fg=THEME["button_fg"])
         self.topology_btn.pack(fill=tk.X, padx=10, pady=5)
         
-        # Kullanım rehberi
-        help_frame = tk.LabelFrame(control_frame, text="💡 Kullanım Rehberi",
-                                  bg=THEME["panel_bg"], fg=THEME["text_color"])
-        help_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Bağlı kullanıcılar listesi
+        users_frame = tk.LabelFrame(control_frame, text="👥 Bağlı Kullanıcılar",
+                                   bg=THEME["panel_bg"], fg=THEME["text_color"])
+        users_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        help_text = tk.Text(help_frame, height=8, width=25,
-                           bg=THEME["bg"], fg=THEME["muted"],
-                           font=("Arial", 9), wrap=tk.WORD)
-        help_text.pack(fill=tk.X, padx=5, pady=5)
+        self.users_display = scrolledtext.ScrolledText(users_frame, height=8, width=25,
+                                                      bg=THEME["bg"], fg=THEME["text_color"],
+                                                      font=("Arial", 10), wrap=tk.WORD,
+                                                      state=tk.DISABLED)
+        self.users_display.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        help_content = """🎯 CHAT UYGULAMASI
-
-✅ HIZLI BAŞLANGIÇ:
-1. Pencere 1: "emre" → Sunucu Başlat
-2. Pencere 2: "ali" → Sunucuya Bağlan  
-3. Mesajlaşın! 🎉
-
-🚀 SUNUCU:
-- Kullanıcı adı girin
-- TCP seçin (önerilen)
-- "Sunucu Başlat" tıklayın
-
-🔗 İSTEMCİ:
-- Kullanıcı adı girin  
-- Port otomatik güncellenir
-- "Sunucuya Bağlan" tıklayın
-
-📡 ÖZELLİKLER:
-✓ TCP/UDP protokol desteği
-✓ Çoklu kullanıcı 
-✓ Network topology haritası
-✓ Otomatik port yönetimi
-
-⚡ Etiketler: [Sen] [Diğer] [Sistem]"""
-
-        help_text.insert(tk.END, help_content)
-        help_text.config(state=tk.DISABLED)
+        # Kullanıcı listesini yenile butonu
+        refresh_users_btn = tk.Button(users_frame, text="🔄 Yenile",
+                                     command=self.refresh_user_list,
+                                     bg=THEME["button_bg"], fg=THEME["button_fg"],
+                                     font=("Arial", 9))
+        refresh_users_btn.pack(pady=5)
+        
+        # İlk yükleme
+        self.refresh_user_list()
 
     def start_server(self):
         """Seçili sunucu türünü başlat"""
@@ -328,6 +314,8 @@ class SimpleChatApp:
             self.port_entry.insert(0, str(self.server_port))
                 
             self.status_label.config(text="🔴 Bağlantı Yok", fg=THEME["error"])
+            self.connected_users = []
+            self.refresh_user_list()
             self.add_message("[Sistem] Tüm bağlantılar durduruldu")
             
         except Exception as e:
@@ -354,6 +342,8 @@ class SimpleChatApp:
             pass  # Topology discovery hatalarını yoksay
         
         self.status_label.config(text=f"🟢 TCP Server:{self.server_port}", fg=THEME["success"])
+        self.connected_users = [self.current_username]
+        self.refresh_user_list()
         self.add_message(f"[Sistem] TCP sunucu başlatıldı - {self.current_username} (Port: {self.server_port})")
 
     def start_udp_server(self):
@@ -369,6 +359,8 @@ class SimpleChatApp:
             pass  # Topology discovery hatalarını yoksay
         
         self.status_label.config(text=f"🟢 UDP Server:{self.server_port}", fg=THEME["success"])
+        self.connected_users = [self.current_username]
+        self.refresh_user_list()
         self.add_message(f"[Sistem] UDP sunucu başlatıldı - {self.current_username} (Port: {self.server_port})")
     
     def start_server_message_listener(self):
@@ -382,8 +374,12 @@ class SimpleChatApp:
                     if self.tcp_server:
                         messages = server.get_server_messages()
                         for msg in messages:
-                            if msg["sender"] != self.current_username:
+                            if msg["type"] == "message" and msg["sender"] != self.current_username:
                                 self.add_message(f"[Diğer] {msg['sender']}: {msg['text']}")
+                            elif msg["type"] == "userlist":
+                                # Sunucu kullanıcı adını da ekle
+                                all_users = [self.current_username] + msg["users"]
+                                self.update_user_list(all_users)
                     
                     time.sleep(0.1)  # 100ms kontrol aralığı
                     
@@ -446,9 +442,11 @@ class SimpleChatApp:
         
         self.is_client_mode = True
         self.status_label.config(text=f"🟢 TCP Client:{target_port}", fg=THEME["success"])
+        self.connected_users = [self.current_username]
+        self.refresh_user_list()
         self.add_message(f"[Sistem] TCP sunucuya bağlanıldı - {self.current_username} (Port: {target_port})")
         
-        # Mesaj alma thread'i
+                                # Mesaj alma thread'i
         def receive_tcp_messages():
             import socket
             while self.is_client_mode:
@@ -472,6 +470,7 @@ class SimpleChatApp:
                         elif msg_type == "userlist":
                             if "extra" in packet["payload"] and "users" in packet["payload"]["extra"]:
                                 users = packet["payload"]["extra"]["users"]
+                                self.update_user_list(users)
                                 user_str = ", ".join(users)
                                 self.add_message(f"[Sistem] Bağlı kullanıcılar: {user_str}")
                             else:
@@ -501,9 +500,11 @@ class SimpleChatApp:
         
         self.is_client_mode = True
         self.status_label.config(text=f"🟢 UDP Client:{target_port}", fg=THEME["success"])
+        self.connected_users = [self.current_username]
+        self.refresh_user_list()
         self.add_message(f"[Sistem] UDP sunucuya bağlanıldı - {self.current_username} (Port: {target_port})")
         
-        # Mesaj alma thread'i
+                                # Mesaj alma thread'i
         def receive_udp_messages():
             while self.is_client_mode:
                 try:
@@ -527,6 +528,7 @@ class SimpleChatApp:
                         elif msg_type == "userlist":
                             if "extra" in packet["payload"] and "users" in packet["payload"]["extra"]:
                                 users = packet["payload"]["extra"]["users"]
+                                self.update_user_list(users)
                                 user_str = ", ".join(users)
                                 self.add_message(f"[Sistem] Bağlı kullanıcılar: {user_str}")
                             else:
@@ -568,12 +570,16 @@ class SimpleChatApp:
             
             self.is_client_mode = False
             self.status_label.config(text="🔴 Bağlantı Yok", fg=THEME["error"])
+            self.connected_users = []
+            self.refresh_user_list()
             self.add_message("[Sistem] Sunucu bağlantısı kesildi")
             
         except Exception as e:
             messagebox.showerror("Hata", f"Bağlantı kesilemedi: {e}")
             self.is_client_mode = False
             self.status_label.config(text="🔴 Bağlantı Yok", fg=THEME["error"])
+            self.connected_users = []
+            self.refresh_user_list()
 
     def send_message(self, event=None):
         """Mesaj gönder"""
@@ -597,6 +603,8 @@ class SimpleChatApp:
                 server.broadcast(packet)
                 
                 self.add_message(f"[Sen] {self.current_username}: {message}")
+                # Kullanıcı listesini yenile
+                self.refresh_user_list()
             except Exception as e:
                 self.add_message(f"[Hata] Mesaj gönderilemedi: {e}")
         
@@ -790,6 +798,65 @@ class SimpleChatApp:
         map_text.insert(tk.END, f"\n⏰ Son güncelleme: {discovery_time}")
         
         map_text.config(state=tk.DISABLED)
+    
+    def refresh_user_list(self):
+        """Bağlı kullanıcılar listesini güncelle"""
+        # TCP sunucu ise direkt server'dan al
+        if self.tcp_server:
+            try:
+                import server
+                connected_users = server.get_connected_users()
+                # Sunucu kullanıcı adını da ekle
+                all_users = [self.current_username] + connected_users
+                self.connected_users = all_users
+            except:
+                pass
+        
+        self.users_display.config(state=tk.NORMAL)
+        self.users_display.delete(1.0, tk.END)
+        
+        if not self.current_username:
+            self.users_display.insert(tk.END, "🔴 Henüz bağlantı yok\n\n")
+            self.users_display.insert(tk.END, "Sunucu başlatın veya\nsunucuya bağlanın.")
+        else:
+            # Durum başlığı
+            status = ""
+            if self.tcp_server:
+                status = f"🟢 TCP Sunucu:{self.server_port}"
+            elif self.udp_server:
+                status = f"🟢 UDP Sunucu:{self.server_port}"
+            elif self.is_client_mode:
+                port = self.port_entry.get().strip() if self.port_entry.get().strip() else "12345"
+                conn_type = "TCP" if self.connection_type.get() == "tcp" else "UDP"
+                status = f"🔗 {conn_type} İstemci:{port}"
+            else:
+                status = "🔴 Bağlantı Yok"
+            
+            self.users_display.insert(tk.END, f"{status}\n")
+            self.users_display.insert(tk.END, "=" * 25 + "\n\n")
+            
+            # Mevcut kullanıcı
+            self.users_display.insert(tk.END, f"👤 {self.current_username} (Sen)\n")
+            
+            # Bağlı kullanıcılar
+            if self.connected_users:
+                self.users_display.insert(tk.END, "\n👥 Diğer Kullanıcılar:\n")
+                for i, user in enumerate(self.connected_users, 1):
+                    if user != self.current_username:
+                        self.users_display.insert(tk.END, f"  {i}. {user}\n")
+            else:
+                self.users_display.insert(tk.END, "\n🔍 Başka kullanıcı yok")
+            
+            # Toplam sayı
+            total_users = len([u for u in self.connected_users if u != self.current_username]) + 1
+            self.users_display.insert(tk.END, f"\n\n📊 Toplam: {total_users} kullanıcı")
+        
+        self.users_display.config(state=tk.DISABLED)
+    
+    def update_user_list(self, users):
+        """Kullanıcı listesini güncelle (sunucudan gelen verilerle)"""
+        self.connected_users = users
+        self.refresh_user_list()
 
 # Ana uygulama
 if __name__ == "__main__":

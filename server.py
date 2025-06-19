@@ -165,6 +165,14 @@ def broadcast_user_list():
                 client.send(msg)
             except:
                 pass
+        
+        # Sunucu GUI'si için de kullanıcı listesi güncellemesi ekle
+        with server_queue_lock:
+            server_message_queue.append({
+                "type": "userlist",
+                "users": user_list,
+                "timestamp": time.time()
+            })
 
 def start_server_with_port(port=12345):
     """TCP sunucusunu belirtilen port ile başlat"""
@@ -210,6 +218,11 @@ def get_server_messages():
         messages = server_message_queue.copy()
         server_message_queue.clear()
         return messages
+
+def get_connected_users():
+    """Sunucu GUI'si için bağlı kullanıcı listesini al"""
+    with lock:
+        return [userinfo[0] for userinfo in clients.values()]
 
 def stop_server(finally_call=False):
     """Sunucuyu güvenli bir şekilde durdur"""
