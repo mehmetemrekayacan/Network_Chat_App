@@ -1,17 +1,18 @@
 """
-UDP tabanlı chat sunucusu.
-- Çok kullanıcılı, güvenilirlik mekanizmalı UDP chat sunucusu.
-- Protokol: network/protocol.py (v1.2)
-- Özellikler: pencere yönetimi, paket parçalama, RTT, bağlantı yönetimi, hata yönetimi.
+Basit UDP Chat Sunucusu
+- UDP üzerinde güvenilir mesaj iletimi
+- Sequence number ile sıralama 
+- ACK ile onaylama
+- Timeout ile yeniden gönderim
 """
 import socket
 import threading
 import time
 from datetime import datetime
 from protocol import (
-    build_packet, parse_packet, PROTOCOL_VERSION, MIN_SUPPORTED_VERSION,
-    MAX_PACKET_SIZE, MESSAGE_TYPES, ERROR_CODES, version_compatible,
-    fragmenter, window, RETRY_TIMEOUT, MAX_RETRIES
+    build_packet, parse_packet, PROTOCOL_VERSION,
+    MAX_PACKET_SIZE, MESSAGE_TYPES, RETRY_TIMEOUT, MAX_RETRIES,
+    sequencer
 )
 
 class UDPServer:
@@ -19,372 +20,258 @@ class UDPServer:
         self.host = host
         self.port = port
         self.sock = None
-        self.clients = {}  # {addr: {"username": str, "version": str, "window": SlidingWindow, "last_seen": float}}
-        self.running = False
+        self.is_running = False
+        
+        # Basit kullanıcı yönetimi
+        self.clients = {}  # {addr: {"username": str, "last_seen": time}}
         self.lock = threading.Lock()
         
+        # Basit güvenilirlik 
+        self.pending_messages = {}  # {(addr, seq): {"packet": bytes, "timestamp": time, "retries": int}}
+        
     def start(self):
-        """Sunucuyu başlat"""
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind((self.host, self.port))
-        self.running = True
-        
-        print(f"[*] UDP Sunucu başlatıldı - {self.host}:{self.port}")
-        print(f"[*] Protokol v{PROTOCOL_VERSION} (Min: v{MIN_SUPPORTED_VERSION})")
-        print(f"[*] Maksimum paket boyutu: {MAX_PACKET_SIZE} bytes")
-        print(f"[*] Yeniden gönderim: {MAX_RETRIES} deneme, {RETRY_TIMEOUT}s timeout")
-        
-        # İstemci yönetimi thread'i
-        threading.Thread(target=self.manage_clients, daemon=True).start()
-        
-        # Ana mesaj alma döngüsü
-        while self.running:
-            try:
-                data, addr = self.sock.recvfrom(MAX_PACKET_SIZE)
-                threading.Thread(target=self.handle_packet, args=(data, addr), daemon=True).start()
-            except Exception as e:
-                if self.running:
-                    print(f"[!] Paket alma hatası: {e}")
-                    
-    def stop(self):
-        """Sunucuyu güvenli bir şekilde durdur"""
-        if not self.running:
-            return
+        """UDP sunucuyu başlat"""
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.bind((self.host, self.port))
+            self.is_running = True
             
-        self.running = False
-        
-        # Tüm istemcilere kapanış mesajı gönder
-        with self.lock:
-            for addr, client in self.clients.items():
-                try:
-                    self.sock.sendto(build_packet(
-                        "SERVER", "error",
-                        "Sunucu kapatılıyor...",
-                        error_code=0x0A
-                    ), addr)
-                except:
-                    pass
-                    
-        # Soketi kapat
+            print(f"[*] UDP Sunucu başlatıldı: {self.host}:{self.port}")
+            print(f"[*] Protokol v{PROTOCOL_VERSION}")
+            
+            # Thread'leri başlat
+            threading.Thread(target=self.listen_loop, daemon=True).start()
+            threading.Thread(target=self.retry_loop, daemon=True).start()
+            threading.Thread(target=self.cleanup_loop, daemon=True).start()
+            
+            # Ana döngü
+            while self.is_running:
+                time.sleep(1)
+                
+        except Exception as e:
+            print(f"[!] UDP Sunucu hatası: {e}")
+        finally:
+            self.stop()
+    
+    def stop(self):
+        """Sunucuyu durdur"""
+        self.is_running = False
         if self.sock:
             self.sock.close()
-            
-        print("[*] UDP Sunucu kapatıldı")
-        
-    def manage_clients(self):
-        """İstemci bağlantılarını ve pencere boyutlarını yönet"""
-        while self.running:
+        print("[*] UDP Sunucu durduruldu")
+    
+    def listen_loop(self):
+        """Gelen mesajları dinle"""
+        while self.is_running:
             try:
-                # Bağlantısı kopan istemcileri temizle
-                with self.lock:
-                    current_time = time.time()
-                    disconnected = []
-                    for addr, client in self.clients.items():
-                        if current_time - client["last_seen"] > 30:  # 30 saniye timeout
-                            disconnected.append(addr)
-                    for addr in disconnected:
-                        username = self.clients[addr]["username"]
-                        del self.clients[addr]
-                        self.broadcast_message(
-                            build_packet(
-                                "SERVER", "leave",
-                                f"{username} bağlantısı koptu (Timeout)",
-                                error_code=0x07
-                            )
-                        )
-
-                    # --- DİNAMİK PENCERE BOYUTU KONTROLÜ ---
-                    for addr, client in self.clients.items():
-                        wnd = client["window"]
-                        # Basit bir mantık: Eğer çok fazla onaylanmamış paket varsa pencereyi küçült, azsa büyüt
-                        unacked = len([seq for seq, acked in wnd.acks.items() if not acked])
-                        prev_size = wnd.window_size
-                        if unacked > wnd.window_size // 2 and wnd.window_size > 1:
-                            wnd.update_window_size(wnd.window_size - 1)
-                        elif unacked == 0 and wnd.window_size < 10:
-                            wnd.update_window_size(wnd.window_size + 1)
-                        # Eğer pencere boyutu değiştiyse, istemciye window_update mesajı gönder
-                        if wnd.window_size != prev_size:
-                            try:
-                                self.sock.sendto(build_packet(
-                                    "SERVER", "window_update",
-                                    f"Pencere boyutu güncellendi: {wnd.window_size}",
-                                    window=wnd.window_size
-                                ), addr)
-                            except Exception as e:
-                                print(f"[!] Pencere boyutu güncelleme mesajı gönderilemedi: {e}")
-
-                time.sleep(5)  # Her 5 saniyede bir kontrol et
+                data, addr = self.sock.recvfrom(MAX_PACKET_SIZE)
+                self.handle_packet(data, addr)
             except Exception as e:
-                print(f"[!] İstemci yönetim hatası: {e}")
-                
+                if self.is_running:
+                    print(f"[!] Dinleme hatası: {e}")
+    
     def handle_packet(self, data, addr):
         """Gelen paketi işle"""
-        try:
-            packet = parse_packet(data)
-            if not packet:
-                # Geçersiz paket
-                self.sock.sendto(build_packet(
-                    "SERVER", "error",
-                    "Geçersiz paket formatı",
-                    error_code=0x01
-                ), addr)
-                return
-                
-            header = packet["header"]
-            msg_type = header["type"]
+        packet = parse_packet(data)
+        if not packet:
+            return
             
-            # Hata kodu kontrolü
-            if "error_code" in header:
-                error_code = header["error_code"]
-                if error_code != 0x00:  # Başarılı değilse
-                    username = self.clients.get(addr, {}).get("username", "Bilinmeyen")
-                    print(f"[!] İstemci hatası ({username}): {ERROR_CODES.get(error_code, 'Bilinmeyen hata')}")
-                    return
+        msg_type = packet["header"]["type"]
+        sender = packet["header"]["sender"]
+        text = packet["payload"]["text"]
+        seq = packet["header"].get("seq")
+        
+        # ACK paketi mi?
+        if msg_type == "ack":
+            self.handle_ack(addr, seq)
+            return
+        
+        # Sequence number varsa ACK gönder
+        if seq is not None:
+            ack_packet = build_packet("SERVER", "ack", seq=seq)
+            self.sock.sendto(ack_packet, addr)
+        
+        # Duplicate kontrolü
+        if seq is not None and sequencer.is_duplicate(seq):
+            return  # Duplicate paket, yoksay
             
-            # Versiyon kontrolü
-            client_version = header["version"]
-            if not version_compatible(client_version):
-                self.sock.sendto(build_packet(
-                    "SERVER", "error",
-                    f"Protokol versiyonu uyumsuz. Sunucu: {PROTOCOL_VERSION}, İstemci: {client_version}",
-                    error_code=0x02
-                ), addr)
-                return
+        # Mesaj tipine göre işle
+        if msg_type == "join":
+            self.handle_join(addr, sender)
+        elif msg_type == "message":
+            self.broadcast_message(packet, addr)
+        elif msg_type == "leave":
+            self.handle_leave(addr, sender)
+        elif msg_type == "ping":
+            self.handle_ping(addr, sender)
             
-            # RTT ölçümü için ping mesajı
-            if msg_type == "ping":
-                # Aynı ping_time ile pong cevabı gönder
-                extra = packet["payload"].get("extra", {})
-                pong_packet = build_packet(
-                    "SERVER", "pong",
-                    extra_payload=extra
-                )
-                self.sock.sendto(pong_packet, addr)
-                return
-                
-            # ACK işleme
-            if msg_type == "ack":
-                with self.lock:
-                    if addr in self.clients:
-                        if "seq" in header:
-                            self.clients[addr]["window"].mark_acked(header["seq"])
-                return
-                
-            # Parça işleme
-            if "fragment" in header:
-                fragment_info = header["fragment"]
-                fragment_id = fragment_info["id"]
-                fragment_no = fragment_info.get("fragment_no", 0)
-                total_fragments = fragment_info["total"]
-                
-                # Parçayı ekle ve tamamlanıp tamamlanmadığını kontrol et
-                complete_data = fragmenter.add_fragment(
-                    fragment_id, fragment_no, total_fragments,
-                    packet["payload"]["data"]
-                )
-                # Parça için fragment_ack gönder
-                self.sock.sendto(build_packet(
-                    "SERVER", "fragment_ack",
-                    extra_payload={
-                        "fragment_id": fragment_id,
-                        "fragment_no": fragment_no
-                    }
-                ), addr)
-                
-                if complete_data:
-                    # Tamamlanan paketi işle
-                    packet = parse_packet(complete_data)
-                    if not packet:
-                        self.sock.sendto(build_packet(
-                            "SERVER", "error",
-                            "Parça birleştirme hatası",
-                            error_code=0x08
-                        ), addr)
-                        return
-                    header = packet["header"]
-                    msg_type = header["type"]
-                else:
-                    # Eksik parça zaman aşımı için fragment_nack gönderme (örnek, gerçek zamanlayıcı ile daha iyi olur)
-                    missing = [i for i in range(total_fragments) if i not in fragmenter.fragments.get(fragment_id, {})]
-                    if missing:
-                        for miss_no in missing:
-                            self.sock.sendto(build_packet(
-                                "SERVER", "fragment_nack",
-                                extra_payload={
-                                    "fragment_id": fragment_id,
-                                    "fragment_no": miss_no
-                                }
-                            ), addr)
-                    return
-
-            # fragment_ack ve fragment_nack mesajlarını işleme (gönderici için temel altyapı)
-            if msg_type == "fragment_ack":
-                # Burada, gönderici tarafında parça için ACK alınırsa yeniden gönderim zamanlayıcısı sıfırlanabilir
-                # (Gelişmiş dosya transferi için kullanılabilir)
-                return
-            if msg_type == "fragment_nack":
-                # Burada, gönderici eksik parça için yeniden gönderim yapabilir
-                # (Gelişmiş dosya transferi için kullanılabilir)
-                print(f"[!] Eksik parça bildirimi alındı: {packet['payload'].get('extra', {})}")
-                return
-            
-            # --- GELİŞMİŞ SIRALAMA: Sıra numarası olan paketleri buffer'a ekle ---
-            if "seq" in header and addr in self.clients:
-                seq = header["seq"]
-                client_window = self.clients[addr]["window"]
-                client_window.add_incoming_packet(seq, packet)
-                # Sırayla işlenebilecek tüm paketleri sırayla işle
-                for in_order_packet in client_window.get_in_order_packets():
-                    self._process_incoming_packet(addr, in_order_packet)
-                # Bu paket zaten işlenecek, döngüye devam
-                return
-            else:
-                # Sıra numarası olmayan kontrol paketleri (örn. ping, pong, version_check)
-                self._process_incoming_packet(addr, packet)
-
-        except Exception as e:
-            print(f"[!] Paket işleme hatası: {e}")
-            try:
-                self.sock.sendto(build_packet(
-                    "SERVER", "error",
-                    f"Sunucu işleme hatası: {e}",
-                    error_code=0x0A
-                ), addr)
-            except:
-                pass
-
-    def _process_incoming_packet(self, addr, packet):
-        """Sıralı işlenmesi gereken paketlerin işlenmesi (orijinal mesaj işleme kodu buraya taşındı)"""
-        header = packet["header"]
-        msg_type = header["type"]
-        # İstemci durumunu güncelle
+        # Son görülme zamanını güncelle
         with self.lock:
             if addr in self.clients:
                 self.clients[addr]["last_seen"] = time.time()
-        # Mesaj tipine göre işle
-        if msg_type == "message":
-            # Mesajı diğer istemcilere ilet
-            self.broadcast_message(packet, exclude=addr)
-        elif msg_type == "leave":
-            # İstemciyi kaldır
+    
+    def handle_join(self, addr, username):
+        """Kullanıcı katılımını işle"""
+        with self.lock:
+            # Username çakışması kontrolü
+            for client_info in self.clients.values():
+                if client_info["username"] == username:
+                    error_packet = build_packet("SERVER", "message", 
+                                               f"Kullanıcı adı '{username}' zaten kullanımda")
+                    self.reliable_send(error_packet, addr)
+                    return
+            
+            # Kullanıcıyı ekle
+            self.clients[addr] = {
+                "username": username,
+                "last_seen": time.time()
+            }
+        
+        # Katılım mesajını yayınla
+        join_msg = build_packet("SERVER", "message", 
+                               f"{username} sohbete katıldı")
+        self.broadcast_to_all(join_msg, exclude=[addr])
+        
+        # Kullanıcı listesini gönder
+        self.send_user_list(addr)
+        
+        print(f"[+] Kullanıcı katıldı: {username} ({addr})")
+    
+    def handle_leave(self, addr, username):
+        """Kullanıcı ayrılımını işle"""
+        with self.lock:
+            if addr in self.clients:
+                del self.clients[addr]
+        
+        # Ayrılma mesajını yayınla
+        leave_msg = build_packet("SERVER", "message", 
+                                f"{username} sohbetten ayrıldı")
+        self.broadcast_to_all(leave_msg, exclude=[addr])
+        
+        print(f"[-] Kullanıcı ayrıldı: {username} ({addr})")
+    
+    def handle_ping(self, addr, sender):
+        """Ping'e pong ile yanıt ver"""
+        pong_packet = build_packet("SERVER", "pong", f"Pong {sender}")
+        self.reliable_send(pong_packet, addr)
+    
+    def handle_ack(self, addr, seq):
+        """ACK mesajını işle"""
+        key = (addr, seq)
+        if key in self.pending_messages:
+            del self.pending_messages[key]
+    
+    def broadcast_message(self, packet, sender_addr):
+        """Mesajı tüm istemcilere yayınla"""
+        self.broadcast_to_all(packet, exclude=[sender_addr])
+    
+    def broadcast_to_all(self, packet_data, exclude=None):
+        """Tüm bağlı istemcilere mesaj gönder"""
+        if exclude is None:
+            exclude = []
+            
+        with self.lock:
+            for addr in list(self.clients.keys()):
+                if addr not in exclude:
+                    self.reliable_send(packet_data, addr)
+    
+    def send_user_list(self, addr):
+        """Kullanıcı listesini gönder"""
+        with self.lock:
+            users = [info["username"] for info in self.clients.values()]
+        
+        user_list_packet = build_packet("SERVER", "userlist", 
+                                       f"Bağlı kullanıcılar: {', '.join(users)}",
+                                       extra={"users": users})
+        self.reliable_send(user_list_packet, addr)
+    
+    def reliable_send(self, packet_data, addr):
+        """Güvenilir mesaj gönderimi (ACK bekleyerek)"""
+        if isinstance(packet_data, dict):
+            # Dict ise encode et
+            packet_data = build_packet(
+                packet_data["header"]["sender"],
+                packet_data["header"]["type"], 
+                packet_data["payload"]["text"],
+                extra=packet_data["payload"].get("extra")
+            )
+        
+        # Sequence number ekle
+        seq = sequencer.get_next_seq()
+        packet = parse_packet(packet_data)
+        packet["header"]["seq"] = seq
+        final_packet = build_packet(
+            packet["header"]["sender"],
+            packet["header"]["type"],
+            packet["payload"]["text"],
+            seq=seq,
+            extra=packet["payload"].get("extra")
+        )
+        
+        # Paketi gönder
+        try:
+            self.sock.sendto(final_packet, addr)
+            
+            # Pending listesine ekle
+            key = (addr, seq)
+            self.pending_messages[key] = {
+                "packet": final_packet,
+                "timestamp": time.time(),
+                "retries": 0
+            }
+        except Exception as e:
+            print(f"[!] Gönderim hatası: {e}")
+    
+    def retry_loop(self):
+        """Timeout olan mesajları yeniden gönder"""
+        while self.is_running:
+            current_time = time.time()
+            
+            # Pending mesajları kontrol et
+            for key, msg_info in list(self.pending_messages.items()):
+                age = current_time - msg_info["timestamp"]
+                
+                if age > RETRY_TIMEOUT:
+                    if msg_info["retries"] < MAX_RETRIES:
+                        # Yeniden gönder
+                        addr, seq = key
+                        try:
+                            self.sock.sendto(msg_info["packet"], addr)
+                            self.pending_messages[key]["timestamp"] = current_time
+                            self.pending_messages[key]["retries"] += 1
+                            print(f"[R] Yeniden gönderim: {addr}, seq={seq}, retry={msg_info['retries']}")
+                        except:
+                            pass
+                    else:
+                        # Maksimum deneme aşıldı
+                        del self.pending_messages[key]
+                        print(f"[!] Mesaj gönderimi başarısız: {key}")
+            
+            time.sleep(0.5)  # 500ms kontrol aralığı
+    
+    def cleanup_loop(self):
+        """Eski kullanıcıları temizle"""
+        while self.is_running:
+            current_time = time.time()
+            timeout = 60  # 60 saniye timeout
+            
             with self.lock:
-                if addr in self.clients:
+                expired_clients = []
+                for addr, client_info in self.clients.items():
+                    if current_time - client_info["last_seen"] > timeout:
+                        expired_clients.append(addr)
+                
+                for addr in expired_clients:
                     username = self.clients[addr]["username"]
                     del self.clients[addr]
-                    self.broadcast_message(
-                        build_packet(
-                            "SERVER", "leave",
-                            f"{username} ayrıldı"
-                        )
-                    )
-        elif msg_type == "version_check":
-            # Versiyon kontrolü yanıtı
-            self.sock.sendto(build_packet(
-                "SERVER", "version_check",
-                f"Sunucu protokol versiyonu: {PROTOCOL_VERSION}",
-                extra_payload={
-                    "server_version": PROTOCOL_VERSION,
-                    "min_version": MIN_SUPPORTED_VERSION
-                }
-            ), addr)
-        # ACK gönder
-        if "seq" in header:
-            self.sock.sendto(build_packet(
-                "SERVER", "ack",
-                seq=header.get("seq"),
-                ack=header.get("seq")
-            ), addr)
+                    print(f"[T] Timeout: {username} ({addr})")
             
-    def send_user_list(self, addr):
-        """Belirli bir istemciye kullanıcı listesini gönder"""
-        with self.lock:
-            user_list = [
-                {
-                    "username": c["username"],
-                    "version": c["version"]
-                }
-                for c in self.clients.values()
-            ]
-            msg = build_packet(
-                "SERVER", "userlist",
-                extra_payload={
-                    "users": user_list,
-                    "server_version": PROTOCOL_VERSION,
-                    "min_version": MIN_SUPPORTED_VERSION
-                }
-            )
-            try:
-                self.sock.sendto(msg, addr)
-            except:
-                pass
-            
-    def broadcast_message(self, packet, exclude=None):
-        """Mesajı tüm istemcilere ilet"""
-        with self.lock:
-            for addr, client in self.clients.items():
-                if addr != exclude:
-                    try:
-                        # Pencere kontrolü
-                        if not client["window"].can_send():
-                            continue
-                            
-                        # Paketi pencereye ekle
-                        seq = client["window"].add_packet(packet)
-                        
-                        # Paketi gönder
-                        self.sock.sendto(packet, addr)
-                        
-                        # ACK bekle
-                        start_time = time.time()
-                        ack_received = False
-                        
-                        while time.time() - start_time < RETRY_TIMEOUT:
-                            try:
-                                self.sock.settimeout(RETRY_TIMEOUT - (time.time() - start_time))
-                                data, ack_addr = self.sock.recvfrom(MAX_PACKET_SIZE)
-                                
-                                if ack_addr == addr:
-                                    ack_packet = parse_packet(data)
-                                    if ack_packet and ack_packet["header"]["type"] == "ack":
-                                        if "seq" in ack_packet["header"] and ack_packet["header"]["seq"] == seq:
-                                            client["window"].mark_acked(seq)
-                                            ack_received = True
-                                            break
-                                            
-                            except socket.timeout:
-                                break
-                                
-                        if not ack_received:
-                            # Yeniden gönderim dene
-                            retries = 0
-                            while retries < MAX_RETRIES:
-                                try:
-                                    self.sock.sendto(packet, addr)
-                                    time.sleep(0.1)  # Kısa bekleme
-                                    
-                                    # ACK kontrolü
-                                    self.sock.settimeout(RETRY_TIMEOUT)
-                                    data, ack_addr = self.sock.recvfrom(MAX_PACKET_SIZE)
-                                    
-                                    if ack_addr == addr:
-                                        ack_packet = parse_packet(data)
-                                        if ack_packet and ack_packet["header"]["type"] == "ack":
-                                            if "seq" in ack_packet["header"] and ack_packet["header"]["seq"] == seq:
-                                                client["window"].mark_acked(seq)
-                                                break
-                                                
-                                except:
-                                    retries += 1
-                                    if retries == MAX_RETRIES:
-                                        print(f"[!] Mesaj iletilemedi ({client['username']}): Maksimum yeniden deneme sayısı aşıldı")
-                                    
-                    except Exception as e:
-                        print(f"[!] Mesaj iletim hatası ({addr}): {e}")
+            time.sleep(30)  # 30 saniyede bir kontrol
 
 if __name__ == "__main__":
     server = UDPServer()
     try:
         server.start()
     except KeyboardInterrupt:
+        print("\n[*] Sunucu kapatılıyor...")
         server.stop()

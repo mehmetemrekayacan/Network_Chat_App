@@ -1,29 +1,33 @@
 """
-TCP tabanlı chat sunucusu.
-- Çok kullanıcılı, güvenilirlik mekanizmalı TCP chat sunucusu.
-- Protokol: network/protocol.py (v1.2)
-- Özellikler: kullanıcı listesi, bağlantı yönetimi, mesaj iletimi, hata yönetimi.
+Basit TCP Chat Sunucusu
+- TCP üzerinde çoklu kullanıcı desteği
+- Basit protokol kullanımı
 """
 import socket
 import threading
 import json
+import time
 from datetime import datetime
 from protocol import (
-    build_packet, parse_packet, PROTOCOL_VERSION, MIN_SUPPORTED_VERSION,
-    MAX_PACKET_SIZE, MESSAGE_TYPES, ERROR_CODES, version_compatible
+    build_packet, parse_packet, PROTOCOL_VERSION,
+    MAX_PACKET_SIZE, MESSAGE_TYPES
 )
 
 MAX_CLIENTS = 10  # Maksimum kullanıcı sayısı
-clients = {}  # {client_socket: (username, ip, version)}
+clients = {}  # {client_socket: (username, ip)}
 lock = threading.Lock()
 server_socket = None
 is_running = False
+
+# Sunucu mesaj queue'su - GUI için
+server_message_queue = []
+server_queue_lock = threading.Lock()
 
 def handle_client(client_socket, client_address):
     """İstemci bağlantısını yönet"""
     print(f"[+] Yeni bağlantı: {client_address}")
     try:
-        # İlk mesaj kullanıcı adı ve JOIN olmalı
+        # İlk mesaj JOIN olmalı
         join_data = client_socket.recv(MAX_PACKET_SIZE)
         if not join_data:
             client_socket.close()
@@ -34,23 +38,7 @@ def handle_client(client_socket, client_address):
             # Geçersiz paket
             try:
                 client_socket.send(build_packet(
-                    "SERVER", "error",
-                    "Geçersiz paket formatı",
-                    error_code=MESSAGE_TYPES["error"]
-                ))
-            except:
-                pass
-            client_socket.close()
-            return
-            
-        # Versiyon kontrolü
-        client_version = join_packet["header"]["version"]
-        if not version_compatible(client_version):
-            try:
-                client_socket.send(build_packet(
-                    "SERVER", "error",
-                    f"Protokol versiyonu uyumsuz. Sunucu: {PROTOCOL_VERSION}, İstemci: {client_version}",
-                    error_code=0x02
+                    "SERVER", "message", "Geçersiz paket formatı"
                 ))
             except:
                 pass
@@ -61,9 +49,7 @@ def handle_client(client_socket, client_address):
         if join_packet["header"]["type"] != "join":
             try:
                 client_socket.send(build_packet(
-                    "SERVER", "error",
-                    "İlk mesaj JOIN olmalı",
-                    error_code=0x05
+                    "SERVER", "message", "İlk mesaj JOIN olmalı"
                 ))
             except:
                 pass
@@ -76,9 +62,7 @@ def handle_client(client_socket, client_address):
             if len(clients) >= MAX_CLIENTS:
                 try:
                     client_socket.send(build_packet(
-                        "SERVER", "error",
-                        "Sunucu dolu, daha fazla kullanıcı kabul edilmiyor.",
-                        error_code=0x06
+                        "SERVER", "message", "Sunucu dolu"
                     ))
                 except:
                     pass
@@ -90,23 +74,20 @@ def handle_client(client_socket, client_address):
             if any(c[0] == username for c in clients.values()):
                 try:
                     client_socket.send(build_packet(
-                        "SERVER", "error",
-                        "Bu kullanıcı adı zaten kullanımda.",
-                        error_code=0x0A
+                        "SERVER", "message", "Bu kullanıcı adı zaten kullanımda"
                     ))
                 except:
                     pass
                 client_socket.close()
                 return
                 
-            clients[client_socket] = (username, client_address[0], client_version)
+            clients[client_socket] = (username, client_address[0])
             
-        # Versiyon bilgisi ile kullanıcı listesi gönder
+        # Kullanıcı listesi gönder
         broadcast_user_list()
         # Katılma mesajını yayınla
         broadcast(build_packet(
-            "SERVER", "join",
-            f"{username} sohbete katıldı (Protokol v{client_version})"
+            "SERVER", "message", f"{username} sohbete katıldı"
         ), exclude=[client_socket])
                 
         while is_running:
@@ -119,39 +100,29 @@ def handle_client(client_socket, client_address):
                 if not packet:
                     continue
                     
-                # Hata kodu kontrolü
-                if "error_code" in packet["header"]:
-                    error_code = packet["header"]["error_code"]
-                    if error_code != 0x00:  # Başarılı değilse
-                        print(f"[!] İstemci hatası ({username}): {ERROR_CODES.get(error_code, 'Bilinmeyen hata')}")
-                        continue
-                    
                 msg_type = packet["header"]["type"]
                 sender = packet["header"]["sender"]
                 text = packet["payload"]["text"]
                 
                 if msg_type == "message":
-                    display_msg = build_packet("message", sender, text)
-                    broadcast(display_msg)
+                    # Sunucu GUI'si için queue'ya ekle
+                    with server_queue_lock:
+                        server_message_queue.append({
+                            "type": "message",
+                            "sender": sender,
+                            "text": text,
+                            "timestamp": time.time()
+                        })
+                    broadcast(build_packet(sender, "message", text))
                 elif msg_type == "leave":
                     break
-                elif msg_type == "version_check":
-                    # Versiyon kontrolü yanıtı
-                    client_socket.send(build_packet(
-                        "SERVER", "version_check",
-                        f"Sunucu protokol versiyonu: {PROTOCOL_VERSION}",
-                        extra_payload={"server_version": PROTOCOL_VERSION}
-                    ))
+                elif msg_type == "ping":
+                    # Ping'e pong ile yanıt
+                    client_socket.send(build_packet("SERVER", "pong", "Pong"))
                     
             except Exception as e:
-                try:
-                    client_socket.send(build_packet(
-                        "SERVER", "error",
-                        f"Hatalı paket: {str(e)}",
-                        error_code=0x0A
-                    ))
-                except:
-                    pass
+                print(f"[!] İstemci hatası: {e}")
+                break
                     
     except:
         pass
@@ -162,8 +133,7 @@ def handle_client(client_socket, client_address):
         if userinfo:
             username = userinfo[0]
             broadcast(build_packet(
-                "SERVER", "leave",
-                f"{username} sohbetten ayrıldı"
+                "SERVER", "message", f"{username} sohbetten ayrıldı"
             ))
             broadcast_user_list()
         print(f"[-] Bağlantı sonlandı: {client_address}")
@@ -184,21 +154,11 @@ def broadcast(message, exclude=None):
 def broadcast_user_list():
     """Güncel kullanıcı listesini tüm istemcilere gönder"""
     with lock:
-        user_list = [
-            {
-                "username": u,
-                "ip": ip,
-                "version": ver
-            }
-            for (_, (u, ip, ver)) in enumerate(clients.items())
-        ]
+        user_list = [userinfo[0] for userinfo in clients.values()]
         msg = build_packet(
             "SERVER", "userlist",
-            extra_payload={
-                "users": user_list,
-                "server_version": PROTOCOL_VERSION,
-                "min_version": MIN_SUPPORTED_VERSION
-            }
+            f"Bağlı kullanıcılar: {', '.join(user_list)}",
+            extra={"users": user_list}
         )
         for client in list(clients.keys()):
             try:
@@ -206,19 +166,19 @@ def broadcast_user_list():
             except:
                 pass
 
-def start_server():
-    """TCP sunucusunu başlat"""
+def start_server_with_port(port=12345):
+    """TCP sunucusunu belirtilen port ile başlat"""
     global server_socket, is_running
     
     try:
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.bind(("0.0.0.0", 12345))
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind(("0.0.0.0", port))
         server_socket.listen()
         is_running = True
-        print(f"[*] TCP Sunucu başlatıldı - 0.0.0.0:12345")
-        print(f"[*] Protokol v{PROTOCOL_VERSION} (Min: v{MIN_SUPPORTED_VERSION})")
+        print(f"[*] TCP Sunucu başlatıldı - 0.0.0.0:{port}")
+        print(f"[*] Protokol v{PROTOCOL_VERSION}")
         print(f"[*] Maksimum kullanıcı: {MAX_CLIENTS}")
-        print(f"[*] Maksimum paket boyutu: {MAX_PACKET_SIZE} bytes")
 
         while is_running:
             try:
@@ -231,7 +191,7 @@ def start_server():
             except socket.timeout:
                 continue
             except:
-                if is_running:  # Sadece beklenmeyen hataları göster
+                if is_running:
                     print("[!] Bağlantı kabul hatası")
                 break
                 
@@ -239,6 +199,17 @@ def start_server():
         print(f"[!] Sunucu hatası: {e}")
     finally:
         stop_server(finally_call=True)
+
+def start_server():
+    """TCP sunucusunu başlat (eski versiyon)"""
+    start_server_with_port(12345)
+
+def get_server_messages():
+    """Sunucu GUI'si için bekleyen mesajları al"""
+    with server_queue_lock:
+        messages = server_message_queue.copy()
+        server_message_queue.clear()
+        return messages
 
 def stop_server(finally_call=False):
     """Sunucuyu güvenli bir şekilde durdur"""
@@ -251,9 +222,7 @@ def stop_server(finally_call=False):
         for client in list(clients.keys()):
             try:
                 client.send(build_packet(
-                    "SERVER", "error",
-                    "Sunucu kapatılıyor...",
-                    error_code=0x0A
+                    "SERVER", "message", "Sunucu kapatılıyor..."
                 ))
             except:
                 pass
@@ -271,7 +240,6 @@ def stop_server(finally_call=False):
             pass
         server_socket = None
     
-    # Konsola sadece bir kez yazdır
     if not finally_call:
         print("[*] TCP Sunucu kapatıldı.")
 
