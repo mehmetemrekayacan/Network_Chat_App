@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import threading
 import time
+import socket
 
 # Sunucu modüllerini import et
 import server
@@ -24,7 +25,8 @@ THEME = {
     "text_color": "#FFFFFF",
     "success": "#28A745",
     "error": "#DC3545",
-    "muted": "#CCCCCC"
+    "muted": "#CCCCCC",
+    "private": "#FF6B35"
 }
 
 class SimpleChatApp:
@@ -53,8 +55,9 @@ class SimpleChatApp:
         self.connected_users = []  # Bağlı kullanıcılar listesi
         
         # UI bileşenleri
-        self.connection_type = tk.StringVar(value="tcp")
-        self.server_port = 12345  # Varsayılan port
+        self.tcp_port = 12345  # TCP public chat port
+        self.udp_port = 12346  # UDP private messaging port
+        self.server_port = self.tcp_port  # Geriye uyumluluk için
         
         self.setup_ui()
 
@@ -120,8 +123,41 @@ class SimpleChatApp:
         msg_frame = tk.Frame(chat_frame, bg=THEME["panel_bg"])
         msg_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         
+        # Mesaj türü seçimi (Proje Kriteri: TCP Public + UDP Private)
+        msg_type_frame = tk.Frame(msg_frame, bg=THEME["panel_bg"])
+        msg_type_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        self.msg_type = tk.StringVar(value="public")
+        tk.Radiobutton(msg_type_frame, text="📢 Public Chat (TCP)", 
+                      variable=self.msg_type, value="public",
+                      bg=THEME["panel_bg"], fg=THEME["text_color"],
+                      selectcolor=THEME["success"], activebackground=THEME["panel_bg"],
+                      command=self.update_message_mode).pack(side=tk.LEFT, padx=(0, 15))
+        
+        tk.Radiobutton(msg_type_frame, text="🔒 Private Message (UDP)", 
+                      variable=self.msg_type, value="private",
+                      bg=THEME["panel_bg"], fg=THEME["text_color"],
+                      selectcolor=THEME["private"], activebackground=THEME["panel_bg"],
+                      command=self.update_message_mode).pack(side=tk.LEFT)
+        
+        # Private mesaj hedefi (Proje Kriteri: User list selection)
+        self.private_target_frame = tk.Frame(msg_frame, bg=THEME["panel_bg"])
+        
+        tk.Label(self.private_target_frame, text="🎯 Hedef:", 
+                bg=THEME["panel_bg"], fg=THEME["text_color"],
+                font=("Arial", 10)).pack(side=tk.LEFT)
+        
+        self.target_user_label = tk.Label(self.private_target_frame, text="Seçilmedi", 
+                                         bg=THEME["panel_bg"], fg=THEME["private"],
+                                         font=("Arial", 10, "bold"))
+        self.target_user_label.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Mesaj giriş
+        msg_input_frame = tk.Frame(msg_frame, bg=THEME["panel_bg"])
+        msg_input_frame.pack(fill=tk.X, pady=(5, 0))
+        
         self.message_entry = tk.Entry(
-            msg_frame,
+            msg_input_frame,
             bg=THEME["entry_bg"], fg=THEME["text_color"],
             font=("Arial", 11)
         )
@@ -129,7 +165,7 @@ class SimpleChatApp:
         self.message_entry.bind("<Return>", self.send_message)
         
         self.send_btn = tk.Button(
-            msg_frame, text="Gönder",
+            msg_input_frame, text="Gönder",
             command=self.send_message,
             bg=THEME["button_bg"], fg=THEME["button_fg"],
             font=("Arial", 10)
@@ -156,72 +192,40 @@ class SimpleChatApp:
                                      bg=THEME["entry_bg"], fg=THEME["text_color"])
         self.username_entry.pack(fill=tk.X, padx=5, pady=5)
         
-        # Bağlantı türü seçimi
-        conn_frame = tk.LabelFrame(control_frame, text="Bağlantı Türü",
-                                  bg=THEME["panel_bg"], fg=THEME["text_color"])
-        conn_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        # Port bilgisi
+        port_info_frame = tk.LabelFrame(control_frame, text="Port Bilgisi",
+                                       bg=THEME["panel_bg"], fg=THEME["text_color"])
+        port_info_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         
-        tk.Radiobutton(conn_frame, text="TCP - Güvenli",
-                      variable=self.connection_type, value="tcp",
-                      bg=THEME["panel_bg"], fg=THEME["text_color"],
-                      selectcolor=THEME["button_bg"], activebackground=THEME["panel_bg"]).pack(anchor="w", padx=5)
-        
-        tk.Radiobutton(conn_frame, text="UDP - Hızlı",
-                      variable=self.connection_type, value="udp",
-                      bg=THEME["panel_bg"], fg=THEME["text_color"],
-                      selectcolor=THEME["button_bg"], activebackground=THEME["panel_bg"]).pack(anchor="w", padx=5)
-        
-        # Port bilgisi ve giriş
-        port_sub_frame = tk.Frame(conn_frame, bg=THEME["panel_bg"])
-        port_sub_frame.pack(fill=tk.X, padx=5, pady=2)
-        
-        tk.Label(port_sub_frame, text="Port:",
+        tk.Label(port_info_frame, text=f"📢 TCP Public Chat: {self.tcp_port}",
                 bg=THEME["panel_bg"], fg=THEME["text_color"],
-                font=("Arial", 9)).pack(side=tk.LEFT)
+                font=("Arial", 10)).pack(anchor="w", padx=5, pady=2)
         
-        self.port_entry = tk.Entry(port_sub_frame, width=8,
-                                  bg=THEME["entry_bg"], fg=THEME["text_color"],
-                                  font=("Arial", 9))
-        self.port_entry.pack(side=tk.LEFT, padx=(5, 0))
-        self.port_entry.insert(0, str(self.server_port))
-        
-        self.port_label = tk.Label(port_sub_frame, text=f"(Sunucu: {self.server_port})",
-                                  bg=THEME["panel_bg"], fg=THEME["muted"],
-                                  font=("Arial", 8))
-        self.port_label.pack(side=tk.LEFT, padx=(5, 0))
+        tk.Label(port_info_frame, text=f"🔒 UDP Private Msg: {self.udp_port}",
+                bg=THEME["panel_bg"], fg=THEME["text_color"],
+                font=("Arial", 10)).pack(anchor="w", padx=5, pady=2)
         
         # Sunucu/İstemci kontrolleri
         server_frame = tk.LabelFrame(control_frame, text="Bağlantı",
                                     bg=THEME["panel_bg"], fg=THEME["text_color"])
         server_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         
-        # Sunucu butonları
-        server_sub_frame = tk.Frame(server_frame, bg=THEME["panel_bg"])
-        server_sub_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Ana bağlantı butonu (Proje Kriteri: Otomatik bağlantı)
+        main_connect_frame = tk.Frame(server_frame, bg=THEME["panel_bg"])
+        main_connect_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        self.start_server_btn = tk.Button(server_sub_frame, text="🚀 Sunucu Başlat",
-                                         command=self.start_server,
-                                         bg=THEME["success"], fg=THEME["button_fg"])
-        self.start_server_btn.pack(fill=tk.X, pady=2)
+        self.auto_connect_btn = tk.Button(main_connect_frame, text="🚀 Otomatik Bağlan",
+                                         command=self.auto_connect,
+                                         bg=THEME["success"], fg=THEME["button_fg"],
+                                         font=("Arial", 11, "bold"))
+        self.auto_connect_btn.pack(fill=tk.X, pady=2)
         
-        self.stop_server_btn = tk.Button(server_sub_frame, text="⏹️ Sunucu Durdur",
-                                        command=self.stop_server,
-                                        bg=THEME["error"], fg=THEME["button_fg"])
-        self.stop_server_btn.pack(fill=tk.X, pady=2)
-        
-        # İstemci butonları
-        client_sub_frame = tk.Frame(server_frame, bg=THEME["panel_bg"])
-        client_sub_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.connect_btn = tk.Button(client_sub_frame, text="🔗 Sunucuya Bağlan",
-                                    command=self.connect_to_server,
-                                    bg=THEME["button_bg"], fg=THEME["button_fg"])
-        self.connect_btn.pack(fill=tk.X, pady=2)
-        
-        self.disconnect_btn = tk.Button(client_sub_frame, text="❌ Bağlantıyı Kes",
+        # Disconnect butonu (sadece bu kalsın)
+        self.disconnect_btn = tk.Button(server_frame, text="❌ Bağlantıyı Kes",
                                        command=self.disconnect_from_server,
-                                       bg=THEME["error"], fg=THEME["button_fg"])
-        self.disconnect_btn.pack(fill=tk.X, pady=2)
+                                       bg=THEME["error"], fg=THEME["button_fg"],
+                                       font=("Arial", 10))
+        self.disconnect_btn.pack(fill=tk.X, pady=5, padx=5)
         
         # Durum gösterimi
         self.status_label = tk.Label(control_frame,
@@ -240,55 +244,306 @@ class SimpleChatApp:
                                    bg=THEME["panel_bg"], fg=THEME["text_color"])
         users_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        self.users_display = scrolledtext.ScrolledText(users_frame, height=8, width=25,
-                                                      bg=THEME["bg"], fg=THEME["text_color"],
-                                                      font=("Arial", 10), wrap=tk.WORD,
-                                                      state=tk.DISABLED)
-        self.users_display.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Kullanıcı listesi (Proje Kriteri: User list for private messaging)
+        self.users_listbox = tk.Listbox(users_frame, 
+                                       bg=THEME["bg"], fg=THEME["text_color"],
+                                       font=("Arial", 10), height=8,
+                                       selectbackground=THEME["button_bg"])
+        self.users_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.users_listbox.bind("<Double-Button-1>", self.select_user_from_list)
         
-        # Kullanıcı listesini yenile butonu
-        refresh_users_btn = tk.Button(users_frame, text="🔄 Yenile",
-                                     command=self.refresh_user_list,
-                                     bg=THEME["button_bg"], fg=THEME["button_fg"],
-                                     font=("Arial", 9))
-        refresh_users_btn.pack(pady=5)
+        # Kullanıcı listesi kontrolleri
+        user_ctrl_frame = tk.Frame(users_frame, bg=THEME["panel_bg"])
+        user_ctrl_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
+        
+        tk.Button(user_ctrl_frame, text="🔄 Yenile",
+                 command=self.refresh_user_list,
+                 bg=THEME["button_bg"], fg=THEME["button_fg"],
+                 font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 5))
+        
+        tk.Button(user_ctrl_frame, text="💬 Private Seç",
+                 command=self.select_user_for_private,
+                 bg=THEME["private"], fg=THEME["button_fg"],
+                 font=("Arial", 9)).pack(side=tk.RIGHT)
         
         # İlk yükleme
         self.refresh_user_list()
+        
+        # Başlangıçta sunucu kontrolü yap
+        threading.Thread(target=self.check_server_on_startup, daemon=True).start()
+        
+        # Private messaging için
+        self.selected_user = None
+        self.tcp_client_socket = None
+        self.udp_client_socket = None
 
-    def start_server(self):
-        """Seçili sunucu türünü başlat"""
+    def update_message_mode(self):
+        """Mesaj moduna göre UI güncelle"""
+        if self.msg_type.get() == "private":
+            self.private_target_frame.pack(fill=tk.X, pady=(0, 5))
+        else:
+            self.private_target_frame.pack_forget()
+
+    def select_user_for_private(self, event=None):
+        """Private mesaj için kullanıcı seç (butondan)"""
+        try:
+            # Mevcut seçimi al
+            selection = self.users_listbox.curselection()
+            if selection:
+                # Seçili varsa onu kullan
+                self.select_user_from_list()
+            else:
+                # Seçili yoksa ilk uygun kullanıcıyı seç
+                if self.connected_users and len(self.connected_users) > 1:
+                    other_users = [u for u in self.connected_users if u != self.current_username]
+                    if other_users:
+                        selected_text = other_users[0]
+                        self.selected_user = selected_text
+                        self.target_user_label.config(text=selected_text)
+                        self.msg_type.set("private")
+                        self.update_message_mode()
+                        self.add_message(f"[Sistem] 🎯 Private mesaj hedefi: {selected_text}")
+                    else:
+                        messagebox.showinfo("Bilgi", "Private mesaj için başka kullanıcı bulunamadı.")
+                else:
+                    messagebox.showinfo("Bilgi", "Private mesaj için başka kullanıcı bulunamadı.")
+        except Exception as e:
+            self.add_message(f"[Hata] Kullanıcı seçiminde hata: {e}")
+
+    def select_user_from_list(self, event=None):
+        """Listbox'dan kullanıcı seç (çift tıklama)"""
+        try:
+            selection = self.users_listbox.curselection()
+            if not selection:
+                return
+            
+            selected_line = self.users_listbox.get(selection[0])
+            
+            # Format: "👤 username (Sen)" veya "👥 username" veya "🔍 Başka kullanıcı yok"
+            if "🔍" in selected_line or "Henüz bağlantı yok" in selected_line:
+                messagebox.showinfo("Bilgi", "Geçerli bir kullanıcı seçin!")
+                return
+            
+            # Username'i extract et
+            if " (Sen)" in selected_line:
+                messagebox.showwarning("Uyarı", "Kendinizi seçemezsiniz!")
+                return
+            
+            # "👥 username" formatından username'i al
+            if "👥" in selected_line:
+                username = selected_line.replace("👥 ", "").strip()
+            elif "👤" in selected_line:
+                username = selected_line.replace("👤 ", "").replace(" (Sen)", "").strip()
+            else:
+                username = selected_line.strip()
+            
+            if username and username != self.current_username:
+                self.selected_user = username
+                self.target_user_label.config(text=username)
+                self.msg_type.set("private")
+                self.update_message_mode()
+                self.add_message(f"[Sistem] 🎯 Private mesaj hedefi: {username}")
+            else:
+                messagebox.showwarning("Uyarı", "Geçerli bir kullanıcı seçin!")
+            
+        except Exception as e:
+            self.add_message(f"[Hata] Kullanıcı seçiminde hata: {e}")
+
+    def check_server_on_startup(self):
+        """Başlangıçta sunucu var mı kontrol et"""
+        time.sleep(1)  # GUI yüklensin
+        
+        try:
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.settimeout(2)
+            test_sock.connect(("localhost", self.server_port))
+            test_sock.close()
+            # Sunucu var
+            self.add_message("[Sistem] 🔍 Mevcut sunucu bulundu. 'Otomatik Bağlan' ile istemci olabilirsiniz.")
+        except:
+            # Sunucu yok
+            self.add_message("[Sistem] 🚀 Sunucu bulunamadı. 'Otomatik Bağlan' ile ilk kullanıcı olarak sunucu başlatabilirsiniz.")
+
+    def auto_connect(self):
+        """Otomatik bağlantı - Proje Kriteri: İlk kullanıcı sunucu, diğerleri istemci"""
         username = self.username_entry.get().strip()
         if not username:
-            messagebox.showerror("Hata", "Kullanıcı adı girin!")
-            return
-        
-        if self.tcp_server or self.udp_server:
-            messagebox.showwarning("Uyarı", "Zaten bir sunucu çalışıyor!")
+            messagebox.showerror("Hata", "Önce kullanıcı adı girin!")
             return
         
         self.current_username = username
-        conn_type = self.connection_type.get()
         
-        # Uygun port bul
-        self.server_port = self.find_available_port()
-        self.port_label.config(text=f"(Sunucu: {self.server_port})")
-        self.port_entry.delete(0, tk.END)
-        self.port_entry.insert(0, str(self.server_port))
-        
+        # Sunucu var mı kontrol et
         try:
-            if conn_type == "tcp":
-                self.start_tcp_server()
-            else:
-                self.start_udp_server()
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.settimeout(2)
+            test_sock.connect(("localhost", self.server_port))
+            test_sock.close()
+            # Sunucu var, istemci ol
+            self.add_message("[Sistem] 🔗 Mevcut sunucuya istemci olarak bağlanılıyor...")
+            self.connect_as_client()
+        except:
+            # Sunucu yok, sunucu ol
+            self.add_message("[Sistem] 🚀 İlk kullanıcı olarak sunucu başlatılıyor...")
+            self.start_as_server()
+
+    def start_as_server(self):
+        """Sunucu olarak başla"""
+        try:
+            # TCP ve UDP sunucuları başlat
+            self.tcp_server_thread = threading.Thread(target=self._start_tcp_server, daemon=True)
+            self.tcp_server_thread.start()
+            
+            self.udp_server = udp_server.UDPServer(port=self.udp_port)
+            self.udp_server_thread = threading.Thread(target=self.udp_server.start, daemon=True)
+            self.udp_server_thread.start()
+            
+            # Sunucu modunda da UDP client socket oluştur (private mesaj için)
+            self.udp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            # Sunucu kendini UDP'ye de register etsin
+            time.sleep(0.5)  # UDP server'ın başlamasını bekle
+            from protocol import build_packet
+            udp_join_packet = build_packet(self.current_username, "join", "katıldı")
+            self.udp_client_socket.sendto(udp_join_packet, ("localhost", self.udp_port))
+            
+            self.tcp_server = True
+            self.status_label.config(text="🟢 Sunucu Modu (TCP+UDP)", fg=THEME["success"])
+            self.connected_users = [self.current_username]
+            self.refresh_user_list()
+            self.add_message(f"[Sistem] ✅ Sunucu başlatıldı - {self.current_username}")
+            self.add_message("[Sistem] 📢 TCP public chat: Port 12345")
+            self.add_message("[Sistem] 🔒 UDP private messaging: Port 12346")
+            
+            # Sunucu mesaj dinleyicisini başlat
+            threading.Thread(target=self.server_message_listener, daemon=True).start()
+            
+            # UDP private mesaj dinleyicisi (sunucu modu için)
+            threading.Thread(target=self.udp_private_listener, daemon=True).start()
+            
         except Exception as e:
             messagebox.showerror("Hata", f"Sunucu başlatılamadı: {e}")
-            self.port_label.config(text=f"(Hata: {self.server_port})")
 
-    def stop_server(self):
-        """Aktif sunucuyu durdur"""
+    def _start_tcp_server(self):
+        """TCP sunucu thread fonksiyonu"""
+        # Sunucu kullanıcı adını set et
+        server.set_server_username(self.current_username)
+        server.start_server_with_port(self.server_port)
+
+    def connect_as_client(self):
+        """İstemci olarak bağlan"""
         try:
-            # Sunucu durdur
+            # TCP bağlantısı
+            self.tcp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.tcp_client_socket.connect(("localhost", self.server_port))
+            
+            # UDP socket
+            self.udp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            # JOIN mesajları gönder
+            from protocol import build_packet
+            
+            # TCP JOIN
+            tcp_join_packet = build_packet(self.current_username, "join", "katıldı")
+            self.tcp_client_socket.send(tcp_join_packet)
+            
+            # UDP JOIN (private messaging için gerekli)
+            udp_join_packet = build_packet(self.current_username, "join", "katıldı")
+            self.udp_client_socket.sendto(udp_join_packet, ("localhost", self.udp_port))
+            
+            self.is_client_mode = True
+            self.status_label.config(text="🟢 İstemci Modu (TCP+UDP)", fg=THEME["success"])
+            self.add_message(f"[Sistem] ✅ Sunucuya bağlanıldı - {self.current_username}")
+            self.add_message("[Sistem] ✅ TCP ve UDP bağlantıları kuruldu")
+            
+            # Mesaj alma thread'i
+            threading.Thread(target=self.client_message_listener, daemon=True).start()
+            
+            # UDP private mesaj dinleyicisi
+            threading.Thread(target=self.udp_private_listener, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("Hata", f"Sunucuya bağlanılamadı: {e}")
+
+    def server_message_listener(self):
+        """Sunucu modu mesaj dinleyicisi"""
+        while self.tcp_server:
+            try:
+                messages = server.get_server_messages()
+                for msg in messages:
+                    if msg["type"] == "message" and msg["sender"] != self.current_username:
+                        self.add_message(f"[Public] {msg['sender']}: {msg['text']}")
+                    elif msg["type"] == "userlist":
+                        # Server'ın kullanıcı listesi güncellemesi
+                        connected_users = msg["users"]
+                        all_users = [self.current_username] + connected_users
+                        self.update_user_list(all_users)
+                        if connected_users:
+                            self.add_message(f"[Sistem] Yeni kullanıcı listesi: {', '.join(all_users)}")
+                time.sleep(0.1)
+            except:
+                break
+
+    def client_message_listener(self):
+        """İstemci modu mesaj dinleyicisi"""
+        from protocol import parse_packet, MAX_PACKET_SIZE
+        
+        while self.is_client_mode:
+            try:
+                data = self.tcp_client_socket.recv(MAX_PACKET_SIZE)
+                if not data:
+                    self.add_message("[Sistem] ❌ Sunucu bağlantısı kesildi")
+                    break
+                
+                packet = parse_packet(data)
+                if packet:
+                    sender = packet["header"]["sender"]
+                    text = packet["payload"]["text"]
+                    msg_type = packet["header"]["type"]
+                    
+                    if msg_type == "message":
+                        if sender == "SERVER":
+                            self.add_message(f"[Sistem] {text}")
+                        elif sender != self.current_username:
+                            self.add_message(f"[Public] {sender}: {text}")
+                    elif msg_type == "userlist":
+                        if "extra" in packet["payload"] and "users" in packet["payload"]["extra"]:
+                            # TCP server artık tüm kullanıcıları gönderiyor (sunucu dahil)
+                            all_users = packet["payload"]["extra"]["users"]
+                            
+                            # Kendimizi de eklememiz gerekirse ekle
+                            if self.current_username not in all_users:
+                                all_users.append(self.current_username)
+                            
+                            self.update_user_list(all_users)
+                            self.add_message(f"[Sistem] Kullanıcı listesi güncellendi: {', '.join(all_users)}")
+            except:
+                if self.is_client_mode:
+                    self.add_message("[Sistem] ❌ Bağlantı hatası")
+                break
+
+
+    
+    def disconnect_from_server(self):
+        """Sunucudan bağlantıyı kes"""
+        try:
+            from protocol import build_packet
+            
+            # LEAVE mesajları gönder
+            if self.tcp_client_socket:
+                tcp_leave_packet = build_packet(self.current_username, "leave", "ayrıldı")
+                self.tcp_client_socket.send(tcp_leave_packet)
+                self.tcp_client_socket.close()
+                self.tcp_client_socket = None
+            
+            # UDP'den de ayrıl
+            if self.udp_client_socket and self.current_username:
+                udp_leave_packet = build_packet(self.current_username, "leave", "ayrıldı")
+                self.udp_client_socket.sendto(udp_leave_packet, ("localhost", self.udp_port))
+                self.udp_client_socket.close()
+                self.udp_client_socket = None
+            
+            # Server sockets'ı kapat
             if self.tcp_server:
                 server.stop_server()
                 self.tcp_server = None
@@ -297,351 +552,129 @@ class SimpleChatApp:
                 self.udp_server.stop()
                 self.udp_server = None
             
-            # İstemci bağlantısını kes
-            if self.is_client_mode:
-                self.disconnect_from_server()
-            
-            # Topology discovery'yi durdur
-            try:
-                self.topology_discovery.stop_discovery()
-            except:
-                pass
-            
-            # Port'u resetle
-            self.server_port = 12345
-            self.port_label.config(text=f"(Sunucu: {self.server_port})")
-            self.port_entry.delete(0, tk.END)
-            self.port_entry.insert(0, str(self.server_port))
-                
-            self.status_label.config(text="🔴 Bağlantı Yok", fg=THEME["error"])
-            self.connected_users = []
-            self.refresh_user_list()
-            self.add_message("[Sistem] Tüm bağlantılar durduruldu")
-            
-        except Exception as e:
-            messagebox.showerror("Hata", f"Bağlantılar durdurulamadı: {e}")
-
-    def start_tcp_server(self):
-        """TCP sunucuyu başlat"""
-        # Custom port ile TCP sunucu başlat
-        def start_tcp_with_port():
-            import server
-            server.start_server_with_port(self.server_port)
-        
-        self.tcp_server_thread = threading.Thread(target=start_tcp_with_port, daemon=True)
-        self.tcp_server_thread.start()
-        self.tcp_server = True
-        
-        # Sunucu mesaj kontrolü thread'i başlat
-        self.start_server_message_listener()
-        
-        # Topology discovery başlat (basitleştirildi)
-        try:
-            self.topology_discovery.start_discovery(self.current_username)
-        except:
-            pass  # Topology discovery hatalarını yoksay
-        
-        self.status_label.config(text=f"🟢 TCP Server:{self.server_port}", fg=THEME["success"])
-        self.connected_users = [self.current_username]
-        self.refresh_user_list()
-        self.add_message(f"[Sistem] TCP sunucu başlatıldı - {self.current_username} (Port: {self.server_port})")
-
-    def start_udp_server(self):
-        """UDP sunucuyu başlat"""
-        self.udp_server = udp_server.UDPServer(port=self.server_port)
-        self.udp_server_thread = threading.Thread(target=self.udp_server.start, daemon=True)
-        self.udp_server_thread.start()
-        
-        # Topology discovery başlat (basitleştirildi)
-        try:
-            self.topology_discovery.start_discovery(self.current_username)
-        except:
-            pass  # Topology discovery hatalarını yoksay
-        
-        self.status_label.config(text=f"🟢 UDP Server:{self.server_port}", fg=THEME["success"])
-        self.connected_users = [self.current_username]
-        self.refresh_user_list()
-        self.add_message(f"[Sistem] UDP sunucu başlatıldı - {self.current_username} (Port: {self.server_port})")
-    
-    def start_server_message_listener(self):
-        """Sunucu modunda mesaj alma thread'i"""
-        def server_message_listener():
-            import server
-            
-            while self.tcp_server or self.udp_server:
-                try:
-                    # TCP sunucu mesajlarını kontrol et
-                    if self.tcp_server:
-                        messages = server.get_server_messages()
-                        for msg in messages:
-                            if msg["type"] == "message" and msg["sender"] != self.current_username:
-                                self.add_message(f"[Diğer] {msg['sender']}: {msg['text']}")
-                            elif msg["type"] == "userlist":
-                                # Sunucu kullanıcı adını da ekle
-                                all_users = [self.current_username] + msg["users"]
-                                self.update_user_list(all_users)
-                    
-                    time.sleep(0.1)  # 100ms kontrol aralığı
-                    
-                except Exception as e:
-                    break
-        
-        self.server_listener_thread = threading.Thread(target=server_message_listener, daemon=True)
-        self.server_listener_thread.start()
-    
-    def connect_to_server(self):
-        """Mevcut sunucuya istemci olarak bağlan"""
-        username = self.username_entry.get().strip()
-        if not username:
-            messagebox.showerror("Hata", "Kullanıcı adı girin!")
-            return
-        
-        if self.is_client_mode:
-            messagebox.showwarning("Uyarı", "Zaten istemci olarak bağlısınız!")
-            return
-            
-        if self.tcp_server or self.udp_server:
-            result = messagebox.askyesno("Uyarı", 
-                "Sunucu modu aktif! Önce sunucuyu durdurup istemci olmak istiyor musunuz?")
-            if result:
-                self.stop_server()
-            else:
-                return
-        
-        self.current_username = username
-        conn_type = self.connection_type.get()
-        
-        # İstemci port'unu al
-        try:
-            client_port = int(self.port_entry.get().strip())
-            if client_port <= 0 or client_port > 65535:
-                raise ValueError("Geçersiz port")
-        except ValueError:
-            messagebox.showerror("Hata", "Geçerli bir port numarası girin (1-65535)!")
-            return
-        
-        try:
-            if conn_type == "tcp":
-                self.connect_tcp_client(client_port)
-            else:
-                self.connect_udp_client(client_port)
-        except Exception as e:
-            messagebox.showerror("Hata", f"Bağlantı kurulamadı: {e}\n\nSunucu port {client_port}'ta çalışıyor mu kontrol edin.")
-    
-    def connect_tcp_client(self, target_port):
-        """TCP istemci bağlantısı"""
-        import socket
-        from protocol import build_packet, parse_packet, MAX_PACKET_SIZE
-        
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client_socket.connect(("localhost", target_port))
-        
-        # JOIN mesajı gönder
-        join_packet = build_packet(self.current_username, "join", "katıldı")
-        self.client_socket.send(join_packet)
-        
-        self.is_client_mode = True
-        self.status_label.config(text=f"🟢 TCP Client:{target_port}", fg=THEME["success"])
-        self.connected_users = [self.current_username]
-        self.refresh_user_list()
-        self.add_message(f"[Sistem] TCP sunucuya bağlanıldı - {self.current_username} (Port: {target_port})")
-        
-                                # Mesaj alma thread'i
-        def receive_tcp_messages():
-            import socket
-            while self.is_client_mode:
-                try:
-                    data = self.client_socket.recv(MAX_PACKET_SIZE)
-                    if not data:
-                        self.add_message("[Sistem] Sunucu bağlantısı kesildi")
-                        break
-                    
-                    packet = parse_packet(data)
-                    if packet:
-                        sender = packet["header"]["sender"]
-                        text = packet["payload"]["text"]
-                        msg_type = packet["header"]["type"]
-                        
-                        if msg_type == "message":
-                            if sender == "SERVER":
-                                self.add_message(f"[Sistem] {text}")
-                            elif sender != self.current_username:
-                                self.add_message(f"[Diğer] {sender}: {text}")
-                        elif msg_type == "userlist":
-                            if "extra" in packet["payload"] and "users" in packet["payload"]["extra"]:
-                                users = packet["payload"]["extra"]["users"]
-                                self.update_user_list(users)
-                                user_str = ", ".join(users)
-                                self.add_message(f"[Sistem] Bağlı kullanıcılar: {user_str}")
-                            else:
-                                self.add_message(f"[Sistem] {text}")
-                        else:
-                            self.add_message(f"[{sender}] {text}")
-                    
-                except Exception as e:
-                    if self.is_client_mode:
-                        self.add_message(f"[Hata] Bağlantı kesildi: {e}")
-                    break
-        
-        self.client_thread = threading.Thread(target=receive_tcp_messages, daemon=True)
-        self.client_thread.start()
-    
-    def connect_udp_client(self, target_port):
-        """UDP istemci bağlantısı"""
-        import socket
-        from protocol import build_packet, parse_packet, MAX_PACKET_SIZE
-        
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        server_addr = ("localhost", target_port)
-        
-        # JOIN mesajı gönder
-        join_packet = build_packet(self.current_username, "join", "katıldı")
-        self.client_socket.sendto(join_packet, server_addr)
-        
-        self.is_client_mode = True
-        self.status_label.config(text=f"🟢 UDP Client:{target_port}", fg=THEME["success"])
-        self.connected_users = [self.current_username]
-        self.refresh_user_list()
-        self.add_message(f"[Sistem] UDP sunucuya bağlanıldı - {self.current_username} (Port: {target_port})")
-        
-                                # Mesaj alma thread'i
-        def receive_udp_messages():
-            while self.is_client_mode:
-                try:
-                    data, addr = self.client_socket.recvfrom(MAX_PACKET_SIZE)
-                    packet = parse_packet(data)
-                    if packet:
-                        sender = packet["header"]["sender"]
-                        text = packet["payload"]["text"]
-                        msg_type = packet["header"]["type"]
-                        
-                        # ACK gönder
-                        if "seq" in packet["header"]:
-                            ack_packet = build_packet("CLIENT", "ack", seq=packet["header"]["seq"])
-                            self.client_socket.sendto(ack_packet, server_addr)
-                        
-                        if msg_type == "message":
-                            if sender == "SERVER":
-                                self.add_message(f"[Sistem] {text}")
-                            elif sender != self.current_username:
-                                self.add_message(f"[Diğer] {sender}: {text}")
-                        elif msg_type == "userlist":
-                            if "extra" in packet["payload"] and "users" in packet["payload"]["extra"]:
-                                users = packet["payload"]["extra"]["users"]
-                                self.update_user_list(users)
-                                user_str = ", ".join(users)
-                                self.add_message(f"[Sistem] Bağlı kullanıcılar: {user_str}")
-                            else:
-                                self.add_message(f"[Sistem] {text}")
-                        else:
-                            self.add_message(f"[{sender}] {text}")
-                            
-                except Exception as e:
-                    if self.is_client_mode:
-                        self.add_message(f"[Hata] Bağlantı kesildi: {e}")
-                    break
-        
-        self.client_thread = threading.Thread(target=receive_udp_messages, daemon=True)
-        self.client_thread.start()
-    
-    def disconnect_from_server(self):
-        """Sunucudan bağlantıyı kes"""
-        if not self.is_client_mode:
-            messagebox.showwarning("Uyarı", "İstemci bağlantısı yok!")
-            return
-        
-        try:
-            # LEAVE mesajı gönder
-            if self.client_socket:
-                from protocol import build_packet
-                leave_packet = build_packet(self.current_username, "leave", "ayrıldı")
-                
-                if self.connection_type.get() == "tcp":
-                    self.client_socket.send(leave_packet)
-                else:
-                    try:
-                        target_port = int(self.port_entry.get().strip())
-                        self.client_socket.sendto(leave_packet, ("localhost", target_port))
-                    except:
-                        self.client_socket.sendto(leave_packet, ("localhost", 12345))
-                
-                self.client_socket.close()
-                self.client_socket = None
-            
             self.is_client_mode = False
             self.status_label.config(text="🔴 Bağlantı Yok", fg=THEME["error"])
             self.connected_users = []
+            self.selected_user = None
+            self.target_user_label.config(text="Seçilmedi")
             self.refresh_user_list()
-            self.add_message("[Sistem] Sunucu bağlantısı kesildi")
+            self.add_message("[Sistem] Bağlantı kesildi")
             
         except Exception as e:
-            messagebox.showerror("Hata", f"Bağlantı kesilemedi: {e}")
+            self.add_message(f"[Hata] Bağlantı kesme hatası: {e}")
             self.is_client_mode = False
             self.status_label.config(text="🔴 Bağlantı Yok", fg=THEME["error"])
             self.connected_users = []
             self.refresh_user_list()
 
     def send_message(self, event=None):
-        """Mesaj gönder"""
+        """Mesaj gönder - Proje Kriteri: TCP Public + UDP Private"""
         message = self.message_entry.get().strip()
         if not message:
             return
             
         if not self.current_username:
-            messagebox.showerror("Hata", "Önce sunucu başlatın!")
+            messagebox.showerror("Hata", "Önce bağlantı kurun!")
             return
         
-        # TCP sunucu varsa TCP olarak gönder
-        if self.tcp_server:
-            try:
-                # TCP sunucudaki tüm istemcilere broadcast yap
-                from protocol import build_packet
-                import server
-                packet = build_packet(self.current_username, "message", message)
-                
-                # Sunucudan gelen mesajları broadcast et
-                server.broadcast(packet)
-                
-                self.add_message(f"[Sen] {self.current_username}: {message}")
-                # Kullanıcı listesini yenile
-                self.refresh_user_list()
-            except Exception as e:
-                self.add_message(f"[Hata] Mesaj gönderilemedi: {e}")
+        msg_type = self.msg_type.get()
         
-        # UDP sunucu varsa UDP olarak gönder  
-        elif self.udp_server:
-            try:
-                from protocol import build_packet
-                packet = build_packet(self.current_username, "message", message)
-                # UDP broadcast
-                self.udp_server.broadcast_to_all(packet)
-                self.add_message(f"[Sen] {self.current_username}: {message}")
-            except Exception as e:
-                self.add_message(f"[Hata] Mesaj gönderilemedi: {e}")
-        # İstemci modunda mesaj gönder
-        elif self.is_client_mode and self.client_socket:
-            try:
-                from protocol import build_packet
-                packet = build_packet(self.current_username, "message", message)
-                
-                if self.connection_type.get() == "tcp":
-                    self.client_socket.send(packet)
-                else:
-                    # UDP için target port'u al
-                    try:
-                        target_port = int(self.port_entry.get().strip())
-                        self.client_socket.sendto(packet, ("localhost", target_port))
-                    except:
-                        self.client_socket.sendto(packet, ("localhost", 12345))
-                
-                # Kendi mesajını göster 
-                self.add_message(f"[Sen] {self.current_username}: {message}")
-            except Exception as e:
-                self.add_message(f"[Hata] Mesaj gönderilemedi: {e}")
+        if msg_type == "public":
+            self.send_public_message(message)
         else:
-            self.add_message("[Hata] Aktif bağlantı yok!")
+            self.send_private_message(message)
             
         self.message_entry.delete(0, tk.END)
+
+    def send_public_message(self, message):
+        """Public mesaj gönder (TCP)"""
+        try:
+            from protocol import build_packet
+            
+            if self.tcp_server:
+                # Sunucu modunda TCP broadcast
+                packet = build_packet(self.current_username, "message", message)
+                server.broadcast(packet)
+                self.add_message(f"[Public] {self.current_username}: {message}")
+                
+            elif self.is_client_mode and self.tcp_client_socket:
+                # İstemci modunda TCP sunucuya gönder
+                packet = build_packet(self.current_username, "message", message)
+                self.tcp_client_socket.send(packet)
+                self.add_message(f"[Public] {self.current_username}: {message}")
+            else:
+                self.add_message("[Hata] TCP bağlantısı yok!")
+                
+        except Exception as e:
+            self.add_message(f"[Hata] Public mesaj gönderilemedi: {e}")
+
+    def send_private_message(self, message):
+        """Private mesaj gönder (UDP)"""
+        if not self.selected_user:
+            messagebox.showwarning("Uyarı", "Private mesaj için önce kullanıcı seçin!")
+            return
+        
+        if self.selected_user == self.current_username:
+            messagebox.showwarning("Uyarı", "Kendinize mesaj gönderemezsiniz!")
+            return
+        
+        try:
+            from protocol import build_packet
+            
+            # UDP private message formatı: @target: message
+            packet = build_packet(self.current_username, "private_message", 
+                                f"@{self.selected_user}: {message}")
+            
+            if self.udp_client_socket:
+                # Hem sunucu hem istemci modunda UDP ile gönder
+                self.udp_client_socket.sendto(packet, ("localhost", self.udp_port))
+                self.add_message(f"[Private] {self.current_username} -> {self.selected_user}: {message}")
+            else:
+                self.add_message("[Hata] UDP bağlantısı yok!")
+            
+        except Exception as e:
+            self.add_message(f"[Hata] Private mesaj gönderilemedi: {e}")
+
+    def udp_private_listener(self):
+        """UDP private mesaj dinleyicisi"""
+        from protocol import parse_packet, build_packet
+        
+        while self.is_client_mode or self.tcp_server:
+            try:
+                if self.udp_client_socket:
+                    self.udp_client_socket.settimeout(3)  # 3 saniye timeout
+                    data, addr = self.udp_client_socket.recvfrom(1024)
+                    
+                    packet = parse_packet(data)
+                    if packet:
+                        sender = packet["header"]["sender"]
+                        text = packet["payload"]["text"]
+                        msg_type = packet["header"]["type"]
+                        seq = packet["header"].get("seq")
+                        
+                        # ACK gönder (tekrar gönderimi önlemek için)
+                        if seq is not None:
+                            ack_packet = build_packet("CLIENT", "ack", seq=seq)
+                            self.udp_client_socket.sendto(ack_packet, addr)
+                        
+                        if msg_type == "private_message" and sender != self.current_username:
+                            # Private mesaj formatı: [Private from sender] message
+                            if text.startswith("[Private from"):
+                                # UDP server'dan gelen private mesaj
+                                self.add_message(f"[Private] {text}")
+                            else:
+                                self.add_message(f"[Private] {sender}: {text}")
+                        elif msg_type == "message" and sender == "SERVER":
+                            # UDP server'dan gelen confirmation/error mesajları
+                            self.add_message(f"[Sistem] {text}")
+                            
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if self.is_client_mode or self.tcp_server:
+                    # Sadece gerçek hata ise log et
+                    pass
+                break
 
     def add_message(self, message: str):
         """Chat'e mesaj ekle"""
@@ -810,48 +843,23 @@ class SimpleChatApp:
                 all_users = [self.current_username] + connected_users
                 self.connected_users = all_users
             except:
-                pass
+                self.connected_users = [self.current_username] if self.current_username else []
         
-        self.users_display.config(state=tk.NORMAL)
-        self.users_display.delete(1.0, tk.END)
+        # Listbox'u güncelle
+        self.users_listbox.delete(0, tk.END)
         
         if not self.current_username:
-            self.users_display.insert(tk.END, "🔴 Henüz bağlantı yok\n\n")
-            self.users_display.insert(tk.END, "Sunucu başlatın veya\nsunucuya bağlanın.")
+            self.users_listbox.insert(tk.END, "🔴 Henüz bağlantı yok")
         else:
-            # Durum başlığı
-            status = ""
-            if self.tcp_server:
-                status = f"🟢 TCP Sunucu:{self.server_port}"
-            elif self.udp_server:
-                status = f"🟢 UDP Sunucu:{self.server_port}"
-            elif self.is_client_mode:
-                port = self.port_entry.get().strip() if self.port_entry.get().strip() else "12345"
-                conn_type = "TCP" if self.connection_type.get() == "tcp" else "UDP"
-                status = f"🔗 {conn_type} İstemci:{port}"
-            else:
-                status = "🔴 Bağlantı Yok"
+            # Kullanıcıları listbox'a ekle
+            for user in self.connected_users:
+                if user == self.current_username:
+                    self.users_listbox.insert(tk.END, f"👤 {user} (Sen)")
+                else:
+                    self.users_listbox.insert(tk.END, f"👥 {user}")
             
-            self.users_display.insert(tk.END, f"{status}\n")
-            self.users_display.insert(tk.END, "=" * 25 + "\n\n")
-            
-            # Mevcut kullanıcı
-            self.users_display.insert(tk.END, f"👤 {self.current_username} (Sen)\n")
-            
-            # Bağlı kullanıcılar
-            if self.connected_users:
-                self.users_display.insert(tk.END, "\n👥 Diğer Kullanıcılar:\n")
-                for i, user in enumerate(self.connected_users, 1):
-                    if user != self.current_username:
-                        self.users_display.insert(tk.END, f"  {i}. {user}\n")
-            else:
-                self.users_display.insert(tk.END, "\n🔍 Başka kullanıcı yok")
-            
-            # Toplam sayı
-            total_users = len([u for u in self.connected_users if u != self.current_username]) + 1
-            self.users_display.insert(tk.END, f"\n\n📊 Toplam: {total_users} kullanıcı")
-        
-        self.users_display.config(state=tk.DISABLED)
+            if len(self.connected_users) <= 1:
+                self.users_listbox.insert(tk.END, "🔍 Başka kullanıcı yok")
     
     def update_user_list(self, users):
         """Kullanıcı listesini güncelle (sunucudan gelen verilerle)"""

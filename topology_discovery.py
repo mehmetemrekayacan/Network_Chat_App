@@ -18,7 +18,7 @@ class NetworkTopologyDiscovery:
         self.peers = {}  # {peer_id: {"ip": str, "port": int, "rtt": float, "last_seen": time}}
         self.connections = {}  # {(peer1, peer2): {"established": bool, "rtt": float}}
         self.network_map = {}  # Network haritası
-        self.discovery_port = 12346  # Topology discovery için ayrı port
+        self.discovery_port = 12347  # Topology discovery için ayrı port (UDP 12346'dan farklı)
         self.lock = threading.Lock()
         self.is_running = False
         self.sock = None

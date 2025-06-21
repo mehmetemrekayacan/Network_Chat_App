@@ -18,6 +18,7 @@ clients = {}  # {client_socket: (username, ip)}
 lock = threading.Lock()
 server_socket = None
 is_running = False
+server_username = None  # Sunucu kullanıcı adı
 
 # Sunucu mesaj queue'su - GUI için
 server_message_queue = []
@@ -151,14 +152,27 @@ def broadcast(message, exclude=None):
             except:
                 pass
 
+def set_server_username(username):
+    """Sunucu kullanıcı adını set et"""
+    global server_username
+    server_username = username
+
 def broadcast_user_list():
     """Güncel kullanıcı listesini tüm istemcilere gönder"""
+    global server_username
     with lock:
-        user_list = [userinfo[0] for userinfo in clients.values()]
+        # Bağlı client'ları al
+        client_users = [userinfo[0] for userinfo in clients.values()]
+        
+        # Sunucu kullanıcısını da ekle
+        all_users = client_users.copy()
+        if server_username and server_username not in all_users:
+            all_users.append(server_username)
+        
         msg = build_packet(
             "SERVER", "userlist",
-            f"Bağlı kullanıcılar: {', '.join(user_list)}",
-            extra={"users": user_list}
+            f"Bağlı kullanıcılar: {', '.join(all_users)}",
+            extra={"users": all_users}
         )
         for client in list(clients.keys()):
             try:
@@ -169,8 +183,8 @@ def broadcast_user_list():
         # Sunucu GUI'si için de kullanıcı listesi güncellemesi ekle
         with server_queue_lock:
             server_message_queue.append({
-                "type": "userlist",
-                "users": user_list,
+                "type": "userlist", 
+                "users": client_users,  # GUI için sadece client'ları gönder
                 "timestamp": time.time()
             })
 

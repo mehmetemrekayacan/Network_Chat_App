@@ -42,13 +42,14 @@ from typing import Dict, Any, Optional, List, Tuple
 # Protokol sabitleri
 PROTOCOL_VERSION = "1.0"
 MAX_PACKET_SIZE = 1024  # 1KB (basit)
-RETRY_TIMEOUT = 2.0     # 2 saniye
-MAX_RETRIES = 3         # 3 deneme
+RETRY_TIMEOUT = 5.0     # 5 saniye
+MAX_RETRIES = 2         # 2 deneme
 
 # Mesaj tipleri
 MESSAGE_TYPES = [
     "join", "message", "leave", "ack", "userlist", 
-    "ping", "pong", "topology_announce", "topology_request", "topology_response"
+    "ping", "pong", "topology_announce", "topology_request", "topology_response",
+    "private_message"  # UDP private messaging support
 ]
 
 def build_packet(sender: str, msg_type: str, text: str = "", 

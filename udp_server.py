@@ -100,6 +100,8 @@ class UDPServer:
             self.handle_join(addr, sender)
         elif msg_type == "message":
             self.broadcast_message(packet, addr)
+        elif msg_type == "private_message":
+            self.handle_private_message(packet, addr)
         elif msg_type == "leave":
             self.handle_leave(addr, sender)
         elif msg_type == "ping":
@@ -154,6 +156,69 @@ class UDPServer:
         """Ping'e pong ile yanıt ver"""
         pong_packet = build_packet("SERVER", "pong", f"Pong {sender}")
         self.reliable_send(pong_packet, addr)
+    
+    def handle_private_message(self, packet, sender_addr):
+        """Private mesajı işle ve hedef kullanıcıya ilet"""
+        sender = packet["header"]["sender"]
+        text = packet["payload"]["text"]
+        
+        # Parse target user from message (@username: message)
+        if text.startswith("@") and ":" in text:
+            try:
+                target_part, message_part = text.split(":", 1)
+                target_user = target_part[1:].strip()  # Remove @
+                message = message_part.strip()
+                
+                # Find target user's address - önce UDP clients'ta ara
+                target_addr = None
+                with self.lock:
+                    for addr, client_info in self.clients.items():
+                        if client_info["username"] == target_user:
+                            target_addr = addr
+                            break
+                
+                # UDP clients'ta bulunamazsa, TCP server'ın kullanıcı listesini kontrol et
+                if not target_addr:
+                    try:
+                        import server
+                        tcp_users = server.get_connected_users()
+                        if target_user in tcp_users:
+                            # Hedef kullanıcı TCP'de var ama UDP'de yok
+                            # Mesajı sadece gönderene confirm olarak gönder
+                            confirm_packet = build_packet("SERVER", "message", 
+                                                        f"Private mesaj {target_user} kullanıcısına TCP üzerinden iletildi")
+                            self.reliable_send(confirm_packet, sender_addr)
+                            print(f"[Private] {sender} -> {target_user}: {message} (TCP user)")
+                            return
+                    except:
+                        pass
+                
+                if target_addr:
+                    # Send private message to target user (UDP'de bağlı)
+                    private_packet = build_packet(sender, "private_message", 
+                                                f"[Private from {sender}] {message}")
+                    self.reliable_send(private_packet, target_addr)
+                    
+                    # Send confirmation to sender
+                    confirm_packet = build_packet("SERVER", "message", 
+                                                f"Private mesaj {target_user} kullanıcısına iletildi")
+                    self.reliable_send(confirm_packet, sender_addr)
+                    
+                    print(f"[Private] {sender} -> {target_user}: {message}")
+                else:
+                    # Target user not found anywhere
+                    error_packet = build_packet("SERVER", "message", 
+                                               f"Kullanıcı '{target_user}' çevrimiçi değil")
+                    self.reliable_send(error_packet, sender_addr)
+                    
+            except Exception as e:
+                error_packet = build_packet("SERVER", "message", 
+                                           f"Private mesaj hatası: {e}")
+                self.reliable_send(error_packet, sender_addr)
+        else:
+            error_packet = build_packet("SERVER", "message", 
+                                       "Private mesaj formatı hatalı. Doğru format: @username: mesaj")
+            self.reliable_send(error_packet, sender_addr)
     
     def handle_ack(self, addr, seq):
         """ACK mesajını işle"""
