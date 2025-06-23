@@ -10,6 +10,7 @@ from tkinter import ttk, messagebox, scrolledtext
 import threading
 import time
 import socket
+import logging
 
 # Import the backend modules
 import server
@@ -60,7 +61,6 @@ class SimpleChatApp:
         self.topology_discovery = topology_discovery.topology_discovery
 
         # Client mode state variables
-        self.client_socket = None # Deprecated, use tcp_client_socket
         self.tcp_client_socket = None
         self.udp_client_socket = None
         self.is_client_mode = False
@@ -76,33 +76,6 @@ class SimpleChatApp:
         self.server_port = self.tcp_port  # For backward compatibility
 
         self.setup_ui()
-
-    def find_available_port(self, start_port=12345) -> int:
-        """
-        Finds an available port for both TCP and UDP.
-
-        Args:
-            start_port (int): The port number to start searching from.
-
-        Returns:
-            int: An available port number.
-        """
-        import socket
-        for port in range(start_port, start_port + 100):
-            try:
-                # Test TCP port
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_sock:
-                    tcp_sock.bind(('', port))
-                # Test UDP port
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp_sock:
-                    udp_sock.bind(('', port))
-                return port
-            except OSError:
-                continue
-        # Fallback to a random port if none in the range are free
-        with socket.socket() as sock:
-            sock.bind(('', 0))
-            return sock.getsockname()[1]
 
     def setup_ui(self):
         """Sets up the main user interface layout."""
@@ -459,41 +432,57 @@ class SimpleChatApp:
 
     def disconnect_from_server(self):
         """Handles disconnection from servers and resets the application state."""
-        try:
-            from protocol import build_packet
-            # Send leave packets
-            if self.tcp_client_socket:
-                leave_packet = build_packet(self.current_username, "leave", "left")
-                self.tcp_client_socket.send(leave_packet)
-                self.tcp_client_socket.close()
-            if self.udp_client_socket and self.current_username:
-                leave_packet = build_packet(self.current_username, "leave", "left")
-                self.udp_client_socket.sendto(leave_packet, ("localhost", self.udp_port))
-                self.udp_client_socket.close()
+        if not self.current_username: return # Already disconnected
 
-            # Stop server threads if we are the host
-            if self.tcp_server: server.stop_server()
-            if self.udp_server: self.udp_server.stop()
-            # Stop discovery service
-            self.topology_discovery.stop_discovery()
+        from protocol import build_packet
 
-            # Reset all state variables
-            self.is_client_mode = False
+        # A client should notify the server that it's leaving.
+        # The server host should not, as it will shut down the server anyway.
+        if self.is_client_mode:
+            try:
+                leave_packet = build_packet(self.current_username, "leave", "left")
+                if self.tcp_client_socket:
+                    self.tcp_client_socket.send(leave_packet)
+                if self.udp_client_socket:
+                    self.udp_client_socket.sendto(leave_packet, ("localhost", self.udp_port))
+            except Exception as e:
+                # Use logging for errors that happen during shutdown
+                logging.error(f"Error sending leave packets: {e}")
+
+        # Stop server threads if we are the host
+        if self.tcp_server:
+            server.stop_server()
             self.tcp_server = None
+        if self.udp_server:
+            self.udp_server.stop()
             self.udp_server = None
-            self.tcp_client_socket = None
-            self.udp_client_socket = None
-            self.current_username = ""
-            self.connected_users = []
-            self.selected_user = None
+        
+        # Always stop the discovery service
+        self.topology_discovery.stop_discovery()
 
-            # Reset UI elements
-            self.status_label.config(text="🔴 Disconnected", fg=THEME["error"])
-            self.target_user_label.config(text="None")
-            self.refresh_user_list()
+        # Close client sockets if they exist
+        if self.tcp_client_socket:
+            self.tcp_client_socket.close()
+        if self.udp_client_socket:
+            self.udp_client_socket.close()
+
+        # Reset all state variables
+        self.is_client_mode = False
+        self.tcp_client_socket = None
+        self.udp_client_socket = None
+        self.current_username = ""
+        self.connected_users = []
+        self.selected_user = None
+
+        # Reset UI elements
+        self.status_label.config(text="🔴 Disconnected", fg=THEME["error"])
+        self.target_user_label.config(text="None")
+        self.username_entry.config(state=tk.NORMAL) # Re-enable username entry
+        self.refresh_user_list()
+        
+        # Don't add a message if the root window is destroyed
+        if self.master.winfo_exists():
             self.add_message("[System] ✅ Disconnected successfully.", "success")
-        except Exception as e:
-            self.add_message(f"[Error] An error occurred during disconnection: {e}", "error")
 
     def send_message(self, event=None):
         """
@@ -630,7 +619,7 @@ class SimpleChatApp:
         )
         peer_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Auto-refreshing display logic
+        # Auto-refreshing display logic using a closure
         def update_display():
             if not topology_window.winfo_exists(): return
             
@@ -654,69 +643,6 @@ class SimpleChatApp:
         
         update_display() # Initial call
     
-    def refresh_peer_display(self, peer_text_widget, info_label_widget):
-        """
-        Refreshes the content of the peer display window.
-
-        Args:
-            peer_text_widget (tk.scrolledtext): The widget to update.
-            info_label_widget (tk.Label): The label to update with stats.
-        """
-        try:
-            if not peer_text_widget.winfo_exists(): return
-            topology_data = self.topology_discovery.get_network_topology()
-            peer_list = self.topology_discovery.get_peer_list()
-            info_label_widget.config(text=f"Total Peers: {len(peer_list)} | Your ID: {topology_data.get('local_peer', 'N/A')}")
-            self.update_peer_display(peer_text_widget, peer_list, topology_data)
-        except tk.TclError: # Window was closed
-            return
-    
-    def start_peer_auto_refresh(self, peer_text_widget, info_label_widget):
-        """
-        Starts the auto-refresh loop for the peer display window.
-        
-        Args:
-            peer_text_widget (tk.scrolledtext): The widget to update.
-            info_label_widget (tk.Label): The label to update with stats.
-        """
-        try:
-            if not peer_text_widget.winfo_exists(): return # Stop if window is closed
-            self.refresh_peer_display(peer_text_widget, info_label_widget)
-            self.master.after(5000, lambda: self.start_peer_auto_refresh(peer_text_widget, info_label_widget))
-        except tk.TclError: # Window was closed
-            return
-    
-    def update_peer_display(self, peer_text_widget, peer_list, topology_data):
-        """
-        Updates the peer display text widget with the latest peer data.
-
-        Args:
-            peer_text_widget (tk.scrolledtext): The widget to update.
-            peer_list (list): The list of discovered peers.
-            topology_data (dict): The full topology data dictionary.
-        """
-        peer_text_widget.config(state=tk.NORMAL)
-        peer_text_widget.delete(1.0, tk.END)
-        
-        peer_text_widget.insert(tk.END, "🌐 NETWORK PEER LIST\n", ("title",))
-        peer_text_widget.insert(tk.END, "="*50 + "\n\n")
-        
-        local_peer = topology_data.get("local_peer", "N/A")
-        peer_text_widget.insert(tk.END, f"📍 Your Peer ID: {local_peer}\n")
-        
-        if not peer_list:
-            peer_text_widget.insert(tk.END, "\n🔍 No other peers discovered yet.\n")
-        else:
-            peer_text_widget.insert(tk.END, f"\n👥 Discovered Peers ({len(peer_list)}):\n")
-            peer_text_widget.insert(tk.END, "-"*40 + "\n\n")
-            for i, peer in enumerate(peer_list, 1):
-                status_icon = "🟢" if peer["status"] == "active" else "🔴"
-                peer_text_widget.insert(tk.END, f"{i}. {status_icon} {peer['peer_id']}\n")
-                peer_text_widget.insert(tk.END, f"   ├─ IP: {peer['ip']}:{peer['port']}\n")
-                peer_text_widget.insert(tk.END, f"   └─ Status: {peer['status'].title()}\n\n")
-        
-        peer_text_widget.config(state=tk.DISABLED)
-
     def refresh_user_list(self):
         """Updates the user listbox with the current list of connected users."""
         if self.tcp_server:
@@ -766,5 +692,5 @@ if __name__ == "__main__":
         root.protocol("WM_DELETE_WINDOW", on_closing)
         root.mainloop()
     except Exception as e:
-        print(f"Application failed to start: {e}")
+        logging.error(f"Application failed to start: {e}")
         input("Press Enter to exit...")

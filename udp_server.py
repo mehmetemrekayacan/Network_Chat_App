@@ -17,12 +17,16 @@ Features:
 import socket
 import threading
 import time
+import logging
 from typing import Union
 from protocol import (
     build_packet, parse_packet, PROTOCOL_VERSION,
     MAX_PACKET_SIZE, MESSAGE_TYPES, RETRY_TIMEOUT, MAX_RETRIES,
     sequencer
 )
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class UDPServer:
     """
@@ -61,9 +65,9 @@ class UDPServer:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.bind((self.host, self.port))
             self.is_running = True
+            logging.info(f"UDP Server started at {self.host}:{self.port}")
             
-            print(f"[*] UDP Server started at {self.host}:{self.port}")
-            print(f"[*] Protokol v{PROTOCOL_VERSION}")
+            logging.info(f"[*] Protokol v{PROTOCOL_VERSION}")
             
             # Start background threads
             threading.Thread(target=self.listen_loop, daemon=True).start()
@@ -75,17 +79,17 @@ class UDPServer:
                 time.sleep(1)
                 
         except Exception as e:
-            print(f"[!] UDP Server error on startup: {e}")
+            logging.error(f"UDP Server error on startup: {e}")
         finally:
             self.stop()
     
     def stop(self):
         """Stops the UDP server gracefully."""
-        print("[*] Stopping UDP Server...")
+        logging.info("Stopping UDP Server...")
         self.is_running = False
         if self.sock:
             self.sock.close()
-        print("[*] UDP Server stopped.")
+        logging.info("UDP Server stopped.")
     
     def listen_loop(self):
         """Continuously listens for incoming UDP packets."""
@@ -95,7 +99,7 @@ class UDPServer:
                 self.handle_packet(data, addr)
             except Exception as e:
                 if self.is_running:
-                    print(f"[!] Listening loop error: {e}")
+                    logging.error(f"Listening loop error: {e}")
     
     def handle_packet(self, data: bytes, addr: tuple):
         """
@@ -171,7 +175,7 @@ class UDPServer:
 
             # If the user is reconnecting from a new port/address, remove the old entry.
             if old_address and old_address != addr:
-                print(f"[*] User '{username}' reconnected. Updating address from {old_address} to {addr}.")
+                logging.info(f"User '{username}' reconnected. Updating address from {old_address} to {addr}.")
                 # This is a critical step: remove the stale entry before adding the new one.
                 del self.clients[old_address]
 
@@ -188,7 +192,7 @@ class UDPServer:
         
         # Send the current user list to the new client.
         self.send_user_list(addr)
-        print(f"[+] UDP User Joined/Reconnected: {username} ({addr})")
+        logging.info(f"UDP User Joined/Reconnected: {username} ({addr})")
     
     def handle_leave(self, addr: tuple, username: str):
         """
@@ -206,7 +210,7 @@ class UDPServer:
         leave_msg_text = f"{username} has left the chat."
         leave_msg_packet = build_packet("SERVER", "message", leave_msg_text)
         self.broadcast_to_all(leave_msg_packet, exclude=[addr])
-        print(f"[-] UDP User Left: {username} ({addr})")
+        logging.info(f"UDP User Left: {username} ({addr})")
     
     def handle_ping(self, addr: tuple, sender: str):
         """
@@ -261,7 +265,7 @@ class UDPServer:
                     confirm_packet = build_packet("SERVER", "message", confirm_msg)
                     self.reliable_send(confirm_packet, sender_addr)
                     
-                    print(f"[Private] {sender} -> {target_user}: {message}")
+                    logging.info(f"Private message: {sender} -> {target_user}")
                 else:
                     # Target user not found
                     error_msg = f"User '{target_user}' is not online or does not exist."
@@ -375,7 +379,7 @@ class UDPServer:
                 "retries": 0
             }
         except Exception as e:
-            print(f"[!] Send error to {addr}: {e}")
+            logging.error(f"Send error to {addr}: {e}")
     
     def retry_loop(self):
         """
@@ -393,16 +397,16 @@ class UDPServer:
                             self.sock.sendto(msg_info["packet"], addr)
                             self.pending_messages[key]["timestamp"] = current_time
                             self.pending_messages[key]["retries"] += 1
-                            print(f"[R] Retrying message to {addr} (seq={seq}, retry={msg_info['retries']})")
+                            logging.info(f"Retrying message to {addr} (seq={seq}, retry={msg_info['retries']})")
                         except Exception:
                             # The client might have disconnected, the cleanup loop will handle it.
                             pass
                     else:
                         # Max retries reached, give up on this message
                         del self.pending_messages[key]
-                        print(f"[!] Message send failed after {MAX_RETRIES} retries: {key}")
+                        logging.warning(f"Message send failed after {MAX_RETRIES} retries: {key}")
             
-            time.sleep(0.5)  # 500ms kontrol aralığı
+            time.sleep(1.0)  # Check for retries every second
     
     def cleanup_loop(self):
         """
@@ -421,14 +425,17 @@ class UDPServer:
                 for addr in expired_clients:
                     username = self.clients[addr]["username"]
                     del self.clients[addr]
-                    print(f"[T] Timeout: {username} ({addr})")
+                    logging.info(f"Timed out and removed client: {username} ({addr})")
+                    # Optionally, broadcast that the user has timed out
+                    timeout_msg = f"{username} has timed out."
+                    self.broadcast_to_all(build_packet("SERVER", "message", timeout_msg))
             
-            time.sleep(60)  # 1 dakikada bir kontrol
+            time.sleep(60)  # Check for inactive clients every minute
 
 if __name__ == "__main__":
     server = UDPServer()
     try:
         server.start()
     except KeyboardInterrupt:
-        print("\n[*] Sunucu kapatılıyor...")
+        logging.info("Shutting down UDP server...")
         server.stop()

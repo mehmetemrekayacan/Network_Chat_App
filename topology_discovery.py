@@ -16,9 +16,13 @@ import socket
 import threading
 import time
 import json
+import logging
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 from protocol import build_packet, parse_packet
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class NetworkTopologyDiscovery:
     """Manages the discovery of peers, RTT measurement, and peer list maintenance."""
@@ -82,36 +86,36 @@ class NetworkTopologyDiscovery:
             # Bind to the discovery port
             try:
                 self.sock.bind(("0.0.0.0", self.discovery_port))
-                print(f"[*] Discovery socket bound to: 0.0.0.0:{self.discovery_port}")
+                logging.info(f"Discovery socket bound to: 0.0.0.0:{self.discovery_port}")
             except OSError as e:
                 # Fallback if the default port is in use
-                print(f"[!] Port {self.discovery_port} is unavailable: {e}. Trying other ports.")
+                logging.warning(f"Port {self.discovery_port} is unavailable: {e}. Trying other ports.")
                 for port in range(self.discovery_port + 1, self.discovery_port + 10):
                     try:
                         self.sock.bind(("0.0.0.0", port))
                         self.discovery_port = port
-                        print(f"[*] Discovery socket bound to alternative port: {port}")
+                        logging.info(f"Discovery socket bound to alternative port: {port}")
                         break
                     except OSError:
                         continue
                 else: # If no port in the range is free, use a random one
                     self.sock.bind(("0.0.0.0", 0))
                     self.discovery_port = self.sock.getsockname()[1]
-                    print(f"[*] Discovery socket bound to random port: {self.discovery_port}")
+                    logging.info(f"Discovery socket bound to random port: {self.discovery_port}")
 
             # Start background threads
             threading.Thread(target=self.listen_discovery, daemon=True).start()
             threading.Thread(target=self.periodic_discovery, daemon=True).start()
             threading.Thread(target=self.rtt_measurement, daemon=True).start()
 
-            print(f"[*] Network topology discovery started for peer '{peer_id}' on port {self.discovery_port}")
+            logging.info(f"Network topology discovery started for peer '{peer_id}' on port {self.discovery_port}")
 
             # Send an initial announcement to be discovered quickly
             time.sleep(1)
             self.broadcast_announcement()
 
         except Exception as e:
-            print(f"[!] Failed to start topology discovery: {e}")
+            logging.error(f"Failed to start topology discovery: {e}")
             self.is_running = False
 
     def stop_discovery(self):
@@ -119,22 +123,22 @@ class NetworkTopologyDiscovery:
         if not self.is_running:
             return
         self.is_running = False
-        print("[*] Stopping network topology discovery...")
+        logging.info("Stopping network topology discovery...")
         
         with self.lock:
             peer_count = len(self.peers)
             if peer_count > 0:
-                print(f"[Cleanup] Clearing {peer_count} peers on shutdown.")
+                logging.info(f"Clearing {peer_count} peers on shutdown.")
                 self.peers.clear()
 
         if self.sock:
             self.sock.close()
             self.sock = None
-        print("[*] Network topology discovery stopped.")
+        logging.info("Network topology discovery stopped.")
 
     def listen_discovery(self):
         """Listens for discovery messages in a loop. Runs in a dedicated thread."""
-        print(f"[*] Discovery listener started for peer: {self.peer_id}")
+        logging.info(f"Discovery listener started for peer: {self.peer_id}")
 
         while self.is_running and self.sock:
             try:
@@ -149,10 +153,10 @@ class NetworkTopologyDiscovery:
 
                     if msg_type in ["ping_topology", "pong_topology"]:
                         timestamp = quick_check.get("timestamp", 0)
-                        print(f"[{msg_type.upper()}] from {peer_id} @ {addr} (ts: {timestamp:.3f})")
+                        logging.debug(f"{msg_type.upper()} from {peer_id} @ {addr} (ts: {timestamp:.3f})")
 
                 except Exception:
-                    print(f"[RX] Received invalid packet from {addr}")
+                    logging.warning(f"Received invalid packet from {addr}")
                     continue
 
                 self.handle_discovery_packet(data, addr)
@@ -161,7 +165,7 @@ class NetworkTopologyDiscovery:
                 continue
             except Exception as e:
                 if self.is_running:
-                    print(f"[!] Discovery listen loop error: {e}")
+                    logging.error(f"Discovery listen loop error: {e}")
                     time.sleep(1)
 
     def handle_discovery_packet(self, data: bytes, addr: Tuple[str, int]):
@@ -193,7 +197,7 @@ class NetworkTopologyDiscovery:
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass # Ignore malformed packets
         except Exception as e:
-            print(f"[!] Error processing discovery packet: {e}")
+            logging.error(f"Error processing discovery packet: {e}")
 
     def handle_peer_announce(self, peer_id: str, addr: Tuple[str, int], packet: dict):
         """
@@ -204,9 +208,8 @@ class NetworkTopologyDiscovery:
             addr (Tuple[str, int]): The address of the peer.
             packet (dict): The announcement packet.
         """
-        print(f"[Announce] Received from {peer_id} at {addr}")
-
         with self.lock:
+            is_new = peer_id not in self.peers
             # Add new peer or update existing one
             self.peers[peer_id] = {
                 "ip": addr[0],
@@ -215,7 +218,10 @@ class NetworkTopologyDiscovery:
                 "rtt": self.peers.get(peer_id, {}).get("rtt", 0.0), # Preserve old RTT if available
                 "last_seen": time.time()
             }
-            print(f"[+] Discovered peer: {peer_id}")
+            if is_new:
+                logging.info(f"Discovered new peer: {peer_id} at {addr}")
+            else:
+                logging.debug(f"Refreshed peer announcement from {peer_id}")
 
         # Respond with a direct announcement to ensure two-way discovery
         self.send_direct_response_announcement(addr)
@@ -238,9 +244,9 @@ class NetworkTopologyDiscovery:
         try:
             if self.sock:
                 self.sock.sendto(json.dumps(response_packet).encode('utf-8'), addr)
-                print(f"[Announce] Sent direct response to {addr}")
+                logging.debug(f"Sent direct announcement response to {addr}")
         except Exception as e:
-            print(f"[!] Failed to send direct announcement to {addr}: {e}")
+            logging.error(f"Failed to send direct announcement to {addr}: {e}")
 
     def handle_ping_topology(self, peer_id: str, addr: Tuple[str, int], packet: dict):
         """
@@ -262,7 +268,7 @@ class NetworkTopologyDiscovery:
             if self.sock:
                 self.sock.sendto(json.dumps(pong_packet).encode('utf-8'), addr)
         except Exception as e:
-            print(f"[!] Failed to send pong to {peer_id}: {e}")
+            logging.error(f"Failed to send pong to {peer_id}: {e}")
 
     def handle_pong_topology(self, peer_id: str, addr: Tuple[str, int], packet: dict):
         """
@@ -285,7 +291,7 @@ class NetworkTopologyDiscovery:
         # Calculate RTT in milliseconds
         rtt = (time.time() - send_time) * 1000
 
-        print(f"[RTT] Received pong from {peer_id}, RTT: {rtt:.2f} ms")
+        logging.info(f"RTT to {peer_id}: {rtt:.2f} ms")
 
         with self.lock:
             if peer_id in self.peers:
@@ -293,7 +299,7 @@ class NetworkTopologyDiscovery:
                 self.peers[peer_id]["last_seen"] = time.time()
             else:
                 # This can happen if we receive a pong from a peer not yet in our list
-                print(f"[!] Received pong from unknown peer {peer_id}, adding them.")
+                logging.warning(f"Received pong from unknown peer {peer_id}, adding them.")
                 self.peers[peer_id] = {
                     "ip": addr[0],
                     "port": addr[1],
@@ -311,7 +317,7 @@ class NetworkTopologyDiscovery:
                 self.cleanup_old_peers()
                 time.sleep(announcement_interval)
             except Exception as e:
-                print(f"[!] Periodic discovery thread error: {e}")
+                logging.error(f"Periodic discovery thread error: {e}")
 
     def broadcast_announcement(self):
         """Announces this peer's presence to the network via UDP broadcast."""
@@ -331,12 +337,12 @@ class NetworkTopologyDiscovery:
             # Also send to localhost for local testing
             self.sock.sendto(packet_bytes, ('127.0.0.1', self.discovery_port))
         except Exception as e:
-            print(f"[!] Broadcast announcement failed: {e}")
+            logging.error(f"Broadcast announcement failed: {e}")
 
     def rtt_measurement(self):
         """Periodically pings all known peers to measure RTT."""
         ping_interval = 10 # seconds
-        print(f"[*] RTT measurement thread started (interval: {ping_interval}s)")
+        logging.info(f"RTT measurement thread started (interval: {ping_interval}s)")
         time.sleep(3) # Initial delay
 
         while self.is_running:
@@ -354,7 +360,7 @@ class NetworkTopologyDiscovery:
                 time.sleep(ping_interval)
 
             except Exception as e:
-                print(f"[!] RTT measurement thread error: {e}")
+                logging.error(f"RTT measurement thread error: {e}")
 
     def ping_peer(self, peer_id: str, addr: Tuple[str, int]):
         """
@@ -378,7 +384,7 @@ class NetworkTopologyDiscovery:
         try:
             self.sock.sendto(json.dumps(packet).encode('utf-8'), addr)
         except Exception as e:
-            print(f"[!] Ping to {peer_id} at {addr} failed: {e}")
+            logging.error(f"Ping to {peer_id} at {addr} failed: {e}")
 
     def cleanup_old_peers(self):
         """Removes peers that have not been seen for longer than the timeout."""
@@ -392,7 +398,7 @@ class NetworkTopologyDiscovery:
             ]
 
             for peer_id in expired_peers:
-                print(f"[-] Peer timed out, removing: {peer_id}")
+                logging.info(f"Peer timed out, removing: {peer_id}")
                 del self.peers[peer_id]
 
     def get_network_topology(self) -> Dict:

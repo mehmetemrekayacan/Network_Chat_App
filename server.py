@@ -11,6 +11,7 @@ import socket
 import threading
 import json
 import time
+import logging
 from protocol import (
     build_packet, parse_packet, PROTOCOL_VERSION,
     MAX_PACKET_SIZE
@@ -28,6 +29,9 @@ server_username = None   # The username of the user hosting the server
 server_message_queue = []
 server_queue_lock = threading.Lock() # A lock for thread-safe access to the message queue
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 def handle_client(client_socket, client_address):
     """
@@ -41,7 +45,7 @@ def handle_client(client_socket, client_address):
         client_socket (socket.socket): The socket object for the connected client.
         client_address (tuple): The client's address (ip, port).
     """
-    print(f"[+] New connection: {client_address}")
+    logging.info(f"New connection from {client_address}")
     username = None
     try:
         # The first message from a client must be a "join" packet.
@@ -68,7 +72,7 @@ def handle_client(client_socket, client_address):
                     client_socket.send(build_packet("SERVER", "message", "Server is full."))
                 except Exception:
                     pass
-                print(f"[-] {client_address} rejected: Server full.")
+                logging.warning(f"Connection from {client_address} rejected: Server full.")
                 return
 
             # Check if the username is already taken
@@ -78,6 +82,7 @@ def handle_client(client_socket, client_address):
                     client_socket.send(build_packet("SERVER", "message", error_msg))
                 except Exception:
                     pass
+                logging.warning(f"Connection from {username}@{client_address} rejected: Username taken.")
                 return
 
             # Add the new client to the dictionary
@@ -87,7 +92,7 @@ def handle_client(client_socket, client_address):
         broadcast_user_list()
         join_notification = f"{username} has joined the chat."
         broadcast(build_packet("SERVER", "message", join_notification), exclude=[client_socket])
-        print(f"[+] {username} joined from {client_address}")
+        logging.info(f"{username} joined from {client_address}")
 
         # Main loop to listen for messages from the client
         while is_running:
@@ -105,7 +110,7 @@ def handle_client(client_socket, client_address):
                 text = packet["payload"]["text"]
 
                 if msg_type == "message":
-                    # Add the message to the server's GUI queue and broadcast it
+                    # Add the message to the server's GUI queue
                     with server_queue_lock:
                         server_message_queue.append({
                             "type": "message",
@@ -113,7 +118,8 @@ def handle_client(client_socket, client_address):
                             "text": text,
                             "timestamp": time.time()
                         })
-                    broadcast(build_packet(sender, "message", text))
+                    # Broadcast the message to all OTHER clients
+                    broadcast(build_packet(sender, "message", text), exclude=[client_socket])
                 elif msg_type == "leave":
                     break  # Client has sent a leave notification
                 elif msg_type == "ping":
@@ -121,15 +127,15 @@ def handle_client(client_socket, client_address):
                     client_socket.send(build_packet("SERVER", "pong", "Pong"))
 
             except (ConnectionResetError, ConnectionAbortedError):
-                print(f"[!] Client {username} disconnected unexpectedly.")
+                logging.warning(f"Client {username} disconnected unexpectedly.")
                 break
             except Exception as e:
-                print(f"[!] Error handling client {username}: {e}")
+                logging.error(f"Error handling client {username}: {e}")
                 break
 
     except Exception as e:
         # This catches errors during the initial handshake
-        print(f"[!] Error with connection {client_address}: {e}")
+        logging.error(f"Error with connection {client_address}: {e}")
     finally:
         # Cleanup: remove the client and notify others
         with lock:
@@ -145,9 +151,9 @@ def handle_client(client_socket, client_address):
             leave_notification = f"{username} has left the chat."
             broadcast(build_packet("SERVER", "message", leave_notification))
             broadcast_user_list()
-            print(f"[-] {username} disconnected.")
+            logging.info(f"{username} disconnected.")
         else:
-            print(f"[-] Connection terminated: {client_address}")
+            logging.info(f"Connection terminated: {client_address}")
 
 
 def broadcast(message: bytes, exclude: list = None):
@@ -245,9 +251,9 @@ def start_server_with_port(port=12345):
         server_socket.bind(("0.0.0.0", port))
         server_socket.listen()
         is_running = True
-        print(f"[*] TCP Server started at 0.0.0.0:{port}")
-        print(f"[*] Protocol v{PROTOCOL_VERSION}")
-        print(f"[*] Max clients: {MAX_CLIENTS}")
+        logging.info(f"TCP Server started at 0.0.0.0:{port}")
+        logging.info(f"Protocol v{PROTOCOL_VERSION}")
+        logging.info(f"Max clients: {MAX_CLIENTS}")
 
         while is_running:
             try:
@@ -262,11 +268,11 @@ def start_server_with_port(port=12345):
                 continue  # Go back to the start of the loop
             except Exception as e:
                 if is_running:
-                    print(f"[!] Error accepting connections: {e}")
+                    logging.error(f"Error accepting connections: {e}")
                 break
 
     except Exception as e:
-        print(f"[!] Server error: {e}")
+        logging.error(f"Server error: {e}")
     finally:
         stop_server(finally_call=True)
 
@@ -345,12 +351,12 @@ def stop_server(finally_call=False):
         server_socket = None
 
     if not finally_call:
-        print("[*] TCP Server stopped.")
+        logging.info("TCP Server stopped.")
 
 
 if __name__ == "__main__":
     try:
         start_server()
     except KeyboardInterrupt:
-        print("\n[*] Shutting down server...")
+        logging.info("Shutting down server...")
         stop_server()
