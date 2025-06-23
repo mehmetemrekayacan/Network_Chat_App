@@ -1,37 +1,43 @@
 """
-Basit Chat Protokolü
-Versiyon: 1.0
+Simple Chat Protocol
+Version: 1.0
 
-Temel chat uygulaması için minimal protokol.
-Gereksinimleri: multi-user chat, UDP reliability, topology discovery
+This module defines the communication protocol for a simple chat application.
+It includes specifications for packet structure, message types, and a basic
+reliability layer for UDP communication.
 
-Paket Formatı:
+Packet Format:
+A packet is a JSON object with the following structure:
 {
     "header": {
         "version": "1.0",
-        "type": "message",
-        "sender": "username", 
-        "timestamp": "ISO-format",
-        "seq": 123  # UDP için sequence number
+        "type": "message",      // See MESSAGE_TYPES for all types
+        "sender": "username",
+        "timestamp": "ISO-format-string",
+        "seq": 123              // Optional sequence number for UDP
     },
     "payload": {
-        "text": "message content"
+        "text": "message content",
+        "extra": {}             // Optional dictionary for additional data
     }
 }
 
-Mesaj Tipleri:
-- join: Kullanıcı katılma
-- message: Normal mesaj  
-- leave: Kullanıcı ayrılma
-- ack: UDP onay mesajı
-- userlist: Kullanıcı listesi
-- ping/pong: RTT ölçümü
-- topology_*: Network topology keşfi
+Message Types:
+- join: A user joins the chat.
+- message: A standard public chat message.
+- private_message: A private message sent over UDP.
+- leave: A user leaves the chat.
+- ack: An acknowledgment for a UDP packet.
+- userlist: A list of connected users.
+- ping/pong: Used for checking connectivity (TCP).
+- peer_announce, peer_request, peer_list: For topology discovery.
+- ping_topology, pong_topology: For RTT measurement in topology discovery.
 
-UDP Güvenilirlik:
-- Sequence number ile sıralama
-- ACK ile onay
-- Timeout ile yeniden gönderim
+UDP Reliability:
+To ensure reliable message delivery over UDP, the protocol uses:
+- Sequence Numbers: To order packets and detect duplicates.
+- Acknowledgments (ACKs): To confirm packet receipt.
+- Timeouts and Retries: To resend lost packets.
 """
 
 import json
@@ -39,26 +45,41 @@ import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 
-# Protokol sabitleri
+# Protocol constants
 PROTOCOL_VERSION = "1.0"
-MAX_PACKET_SIZE = 1024  # 1KB (basit)
-RETRY_TIMEOUT = 5.0     # 5 saniye
-MAX_RETRIES = 2         # 2 deneme
+MAX_PACKET_SIZE = 1024  # 1KB, simple limit for packet size
+RETRY_TIMEOUT = 5.0     # 5 seconds before resending a packet
+MAX_RETRIES = 2         # Number of retries before giving up
 
-# Mesaj tipleri
+# Supported message types
 MESSAGE_TYPES = [
-    "join", "message", "leave", "ack", "userlist", 
+    "join", "message", "leave", "ack", "userlist",
     "ping", "pong", "peer_announce", "peer_request", "peer_list",
     "ping_topology", "pong_topology",
     "private_message"  # UDP private messaging support
 ]
 
-def build_packet(sender: str, msg_type: str, text: str = "", 
-                seq: Optional[int] = None, extra: Optional[Dict] = None) -> bytes:
-    """Basit paket oluştur"""
+def build_packet(sender: str, msg_type: str, text: str = "",
+                 seq: Optional[int] = None, extra: Optional[Dict] = None) -> bytes:
+    """
+    Constructs a protocol-compliant packet.
+
+    Args:
+        sender (str): The username of the sender.
+        msg_type (str): The type of the message (must be in MESSAGE_TYPES).
+        text (str, optional): The main text content of the message. Defaults to "".
+        seq (Optional[int], optional): A sequence number, typically for UDP. Defaults to None.
+        extra (Optional[Dict], optional): A dictionary for additional data in the payload. Defaults to None.
+
+    Raises:
+        ValueError: If the message type is invalid or the resulting packet is too large.
+
+    Returns:
+        bytes: The JSON packet encoded in UTF-8.
+    """
     if msg_type not in MESSAGE_TYPES:
-        raise ValueError(f"Geçersiz mesaj tipi: {msg_type}")
-        
+        raise ValueError(f"Invalid message type: {msg_type}")
+
     packet = {
         "header": {
             "version": PROTOCOL_VERSION,
@@ -70,26 +91,38 @@ def build_packet(sender: str, msg_type: str, text: str = "",
             "text": text
         }
     }
-    
+
     if seq is not None:
         packet["header"]["seq"] = seq
-        
+
     if extra:
         packet["payload"]["extra"] = extra
-    
+
     data = json.dumps(packet).encode('utf-8')
-    
+
+    # Ensure the packet does not exceed the maximum allowed size
     if len(data) > MAX_PACKET_SIZE:
-        raise ValueError(f"Paket çok büyük: {len(data)} bytes")
-        
+        raise ValueError(f"Packet is too large: {len(data)} bytes")
+
     return data
 
 def parse_packet(data: bytes) -> Optional[Dict[str, Any]]:
-    """Basit paket parse et"""
+    """
+    Parses a byte string into a protocol packet (dictionary).
+
+    Performs basic validation to ensure the packet has the required structure
+    and a valid message type.
+
+    Args:
+        data (bytes): The raw byte data received from the socket.
+
+    Returns:
+        Optional[Dict[str, Any]]: The parsed packet as a dictionary, or None if parsing or validation fails.
+    """
     try:
         packet = json.loads(data.decode('utf-8'))
-        
-        # Temel validasyon
+
+        # Basic validation of the packet structure
         if not isinstance(packet, dict):
             return None
         if "header" not in packet or "payload" not in packet:
@@ -98,29 +131,62 @@ def parse_packet(data: bytes) -> Optional[Dict[str, Any]]:
             return None
         if packet["header"]["type"] not in MESSAGE_TYPES:
             return None
-            
+
         return packet
-    except:
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        # Gracefully handle malformed packet data
         return None
 
 # Basit UDP güvenilirlik için sequence tracking
 class SimpleSequencer:
+    """
+    A simple class to manage sequence numbers for UDP communication.
+
+    This helps in ordering packets and detecting duplicates. It is not
+    thread-safe by itself and should be used with a lock in a multi-threaded
+    environment.
+    """
     def __init__(self):
+        """Initializes the sequencer."""
         self.next_seq = 0
-        self.received_seqs = set()
-        
+        self.received_seqs = set()  # Stores sequence numbers of received packets
+
     def get_next_seq(self) -> int:
+        """
+        Gets the next available sequence number and increments the counter.
+
+        Returns:
+            int: The next sequence number.
+        """
         seq = self.next_seq
         self.next_seq += 1
         return seq
-        
+
     def is_duplicate(self, seq: int) -> bool:
+        """
+        Checks if a sequence number has been seen before.
+
+        If the sequence number is new, it is added to the set of received
+        sequence numbers.
+
+        Args:
+            seq (int): The sequence number to check.
+
+        Returns:
+            bool: True if the sequence number is a duplicate, False otherwise.
+        """
         if seq in self.received_seqs:
             return True
         self.received_seqs.add(seq)
         return False
-        
+
     def mark_received(self, seq: int):
+        """
+        Explicitly marks a sequence number as received.
+
+        Args:
+            seq (int): The sequence number to mark.
+        """
         self.received_seqs.add(seq)
 
 # Global sequencer
