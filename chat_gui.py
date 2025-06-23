@@ -234,7 +234,7 @@ class SimpleChatApp:
         self.status_label.pack(pady=10)
         
         # Network Topology butonu
-        self.topology_btn = tk.Button(control_frame, text="🌐 Network Haritası",
+        self.topology_btn = tk.Button(control_frame, text="🌐 Peer Listesi",
                                      command=self.show_network_topology,
                                      bg=THEME["button_bg"], fg=THEME["button_fg"])
         self.topology_btn.pack(fill=tk.X, padx=10, pady=5)
@@ -421,6 +421,9 @@ class SimpleChatApp:
             # UDP private mesaj dinleyicisi (sunucu modu için)
             threading.Thread(target=self.udp_private_listener, daemon=True).start()
             
+            # Topology discovery'yi başlat
+            self.topology_discovery.start_discovery(self.current_username)
+            
         except Exception as e:
             messagebox.showerror("Hata", f"Sunucu başlatılamadı: {e}")
 
@@ -461,6 +464,9 @@ class SimpleChatApp:
             
             # UDP private mesaj dinleyicisi
             threading.Thread(target=self.udp_private_listener, daemon=True).start()
+            
+            # Topology discovery'yi başlat
+            self.topology_discovery.start_discovery(self.current_username)
             
         except Exception as e:
             messagebox.showerror("Hata", f"Sunucuya bağlanılamadı: {e}")
@@ -522,8 +528,6 @@ class SimpleChatApp:
                     self.add_message("[Sistem] ❌ Bağlantı hatası")
                 break
 
-
-    
     def disconnect_from_server(self):
         """Sunucudan bağlantıyı kes"""
         try:
@@ -552,19 +556,31 @@ class SimpleChatApp:
                 self.udp_server.stop()
                 self.udp_server = None
             
+            # Topology discovery'yi durdur
+            self.topology_discovery.stop_discovery()
+            
+            # GUI'DEKİ VERİLERİ HEMEN TEMİZLE
             self.is_client_mode = False
             self.status_label.config(text="🔴 Bağlantı Yok", fg=THEME["error"])
             self.connected_users = []
             self.selected_user = None
             self.target_user_label.config(text="Seçilmedi")
+            self.current_username = ""  # Username'i de temizle
+            
+            # Kullanıcı listesini hemen yenile
             self.refresh_user_list()
-            self.add_message("[Sistem] Bağlantı kesildi")
+            
+            self.add_message("[Sistem] ✅ Bağlantı temizlendi, tüm veriler sıfırlandı")
             
         except Exception as e:
             self.add_message(f"[Hata] Bağlantı kesme hatası: {e}")
+            # Hata olsa bile GUI'yi temizle
             self.is_client_mode = False
             self.status_label.config(text="🔴 Bağlantı Yok", fg=THEME["error"])
             self.connected_users = []
+            self.selected_user = None
+            self.target_user_label.config(text="Seçilmedi")
+            self.current_username = ""
             self.refresh_user_list()
 
     def send_message(self, event=None):
@@ -696,12 +712,12 @@ class SimpleChatApp:
         
         # Yeni pencere oluştur
         topology_window = tk.Toplevel(self.master)
-        topology_window.title("Network Topology Haritası")
+        topology_window.title("Network Peer Listesi")
         topology_window.geometry("600x500")
         topology_window.configure(bg=THEME["bg"])
         
         # Başlık
-        tk.Label(topology_window, text="🌐 Network Topology Discovery",
+        tk.Label(topology_window, text="🌐 Network Peer Discovery",
                 bg=THEME["bg"], fg=THEME["text_color"],
                 font=("Arial", 16, "bold")).pack(pady=10)
         
@@ -709,129 +725,119 @@ class SimpleChatApp:
         main_frame = tk.Frame(topology_window, bg=THEME["bg"])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Sol panel - Peer listesi
-        left_frame = tk.LabelFrame(main_frame, text="Aktif Peer'lar",
+        # Peer listesi frame
+        peer_frame = tk.LabelFrame(main_frame, text="Keşfedilen Peer'lar",
                                   bg=THEME["panel_bg"], fg=THEME["text_color"])
-        left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
-        left_frame.config(width=250)
+        peer_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Peer listesi
-        peer_text = scrolledtext.ScrolledText(left_frame, 
+        # Peer listesi text widget
+        peer_text = scrolledtext.ScrolledText(peer_frame, 
                                             bg=THEME["bg"], fg=THEME["text_color"],
-                                            font=("Courier", 10), height=15, width=30)
+                                            font=("Courier", 11), height=20)
         peer_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Sağ panel - Network haritası
-        right_frame = tk.LabelFrame(main_frame, text="Network Haritası",
-                                   bg=THEME["panel_bg"], fg=THEME["text_color"])
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        
-        # Network haritası
-        map_text = scrolledtext.ScrolledText(right_frame,
-                                           bg=THEME["bg"], fg=THEME["text_color"],
-                                           font=("Courier", 9), height=15)
-        map_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Alt panel - Bilgiler
+        # Alt panel - Bilgiler ve kontroller
         info_frame = tk.Frame(topology_window, bg=THEME["panel_bg"])
         info_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # Bilgi etiketleri
         info_text = f"Toplam Peer: {len(peer_list)} | Yerel Peer: {topology_data.get('local_peer', 'N/A')}"
-        tk.Label(info_frame, text=info_text,
-                bg=THEME["panel_bg"], fg=THEME["text_color"]).pack(side=tk.LEFT)
+        info_label = tk.Label(info_frame, text=info_text,
+                             bg=THEME["panel_bg"], fg=THEME["text_color"],
+                             font=("Arial", 11, "bold"))
+        info_label.pack(side=tk.LEFT, pady=5)
+        
+        # Kontrol butonları
+        btn_frame = tk.Frame(info_frame, bg=THEME["panel_bg"])
+        btn_frame.pack(side=tk.RIGHT)
         
         # Yenile butonu
-        refresh_btn = tk.Button(info_frame, text="🔄 Yenile",
-                               command=lambda: self.refresh_topology(peer_text, map_text, info_frame),
-                               bg=THEME["button_bg"], fg=THEME["button_fg"])
-        refresh_btn.pack(side=tk.RIGHT)
+        refresh_btn = tk.Button(btn_frame, text="🔄 Yenile",
+                               command=lambda: self.refresh_peer_display(peer_text, info_label),
+                               bg=THEME["button_bg"], fg=THEME["button_fg"],
+                               font=("Arial", 10))
+        refresh_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Auto-refresh butonu
+        auto_refresh_btn = tk.Button(btn_frame, text="🔄 Auto (5s)",
+                                    command=lambda: self.start_peer_auto_refresh(peer_text, info_label),
+                                    bg=THEME["success"], fg=THEME["button_fg"],
+                                    font=("Arial", 10))
+        auto_refresh_btn.pack(side=tk.LEFT, padx=2)
         
         # İlk yükleme
-        self.refresh_topology_data(peer_text, map_text, peer_list, topology_data)
+        self.refresh_peer_display(peer_text, info_label)
     
-    def refresh_topology(self, peer_text, map_text, info_frame):
-        """Topology verilerini yenile"""
-        topology_data = self.topology_discovery.get_network_topology()
-        peer_list = self.topology_discovery.get_peer_list()
-        
-        # Info frame güncelle
-        for widget in info_frame.winfo_children():
-            if isinstance(widget, tk.Label):
-                info_text = f"Toplam Peer: {len(peer_list)} | Yerel Peer: {topology_data.get('local_peer', 'N/A')}"
-                widget.config(text=info_text)
-                break
-        
-        self.refresh_topology_data(peer_text, map_text, peer_list, topology_data)
+    def refresh_peer_display(self, peer_text, info_label):
+        """Peer display'ini yenile"""
+        try:
+            # Pencere hala açık mı kontrol et
+            peer_text.winfo_exists()
+            
+            topology_data = self.topology_discovery.get_network_topology()
+            peer_list = self.topology_discovery.get_peer_list()
+            
+            # Info label güncelle
+            info_text = f"Toplam Peer: {len(peer_list)} | Yerel Peer: {topology_data.get('local_peer', 'N/A')}"
+            info_label.config(text=info_text)
+            
+            # Peer listesini güncelle
+            self.update_peer_display(peer_text, peer_list, topology_data)
+            
+        except tk.TclError:
+            # Pencere kapatılmış, işlemi atla
+            print("[TOPOLOGY] Peer display atlandı, pencere kapatıldı")
+            return
     
-    def refresh_topology_data(self, peer_text, map_text, peer_list, topology_data):
-        """Topology verilerini göster"""
-        # Peer listesini göster
+    def start_peer_auto_refresh(self, peer_text, info_label):
+        """Peer auto-refresh başlat"""
+        try:
+            peer_text.winfo_exists()  # Pencere kontrolü
+            self.refresh_peer_display(peer_text, info_label)
+            # 5 saniye sonra tekrar çağır
+            self.master.after(5000, lambda: self.start_peer_auto_refresh(peer_text, info_label))
+        except tk.TclError:
+            # Pencere kapatılmış, auto-refresh'i durdur
+            print("[TOPOLOGY] Peer auto-refresh durduruluyor, pencere kapatıldı")
+            return
+    
+    def update_peer_display(self, peer_text, peer_list, topology_data):
+        """Peer display'ini güncelle"""
         peer_text.config(state=tk.NORMAL)
         peer_text.delete(1.0, tk.END)
         
-        peer_text.insert(tk.END, "PEER LİSTESİ\n")
-        peer_text.insert(tk.END, "=" * 25 + "\n\n")
+        # Başlık
+        peer_text.insert(tk.END, "🌐 NETWORK PEER LİSTESİ\n")
+        peer_text.insert(tk.END, "=" * 50 + "\n\n")
+        
+        # Yerel peer bilgisi
+        local_peer = topology_data.get("local_peer", "N/A")
+        peer_text.insert(tk.END, f"📍 Yerel Peer: {local_peer}\n")
+        peer_text.insert(tk.END, f"⏰ Son güncelleme: {topology_data.get('discovery_time', 'N/A')}\n\n")
         
         if not peer_list:
-            peer_text.insert(tk.END, "Henüz peer keşfedilmedi.\n")
+            peer_text.insert(tk.END, "🔍 Henüz peer keşfedilmedi.\n")
+            peer_text.insert(tk.END, "💡 Diğer kullanıcıların bağlanmasını bekleyin...\n")
         else:
-            for peer in peer_list:
+            peer_text.insert(tk.END, f"👥 Keşfedilen Peer'lar ({len(peer_list)}):\n")
+            peer_text.insert(tk.END, "-" * 40 + "\n\n")
+            
+            for i, peer in enumerate(peer_list, 1):
                 status_icon = "🟢" if peer["status"] == "active" else "🔴"
-                rtt_text = f"{peer['rtt']:.1f}ms" if peer['rtt'] > 0 else "N/A"
                 
-                peer_text.insert(tk.END, f"{status_icon} {peer['peer_id']}\n")
-                peer_text.insert(tk.END, f"   IP: {peer['ip']}:{peer['port']}\n")
-                peer_text.insert(tk.END, f"   RTT: {rtt_text}\n")
-                peer_text.insert(tk.END, f"   Durum: {peer['status']}\n\n")
+                peer_text.insert(tk.END, f"{i}. {status_icon} {peer['peer_id']}\n")
+                peer_text.insert(tk.END, f"   📍 IP: {peer['ip']}:{peer['port']}\n")
+                peer_text.insert(tk.END, f"   📊 Durum: {peer['status'].title()}\n\n")
+            
+            # İstatistikler
+            active_peers = sum(1 for p in peer_list if p["status"] == "active")
+            
+            peer_text.insert(tk.END, "📈 İSTATİSTİKLER\n")
+            peer_text.insert(tk.END, "-" * 20 + "\n")
+            peer_text.insert(tk.END, f"✅ Aktif Peer: {active_peers}/{len(peer_list)}\n")
         
         peer_text.config(state=tk.DISABLED)
-        
-        # Network haritasını göster  
-        map_text.config(state=tk.NORMAL)
-        map_text.delete(1.0, tk.END)
-        
-        map_text.insert(tk.END, "NETWORK HARİTASI\n")
-        map_text.insert(tk.END, "=" * 30 + "\n\n")
-        
-        network_map = topology_data.get("network_map", {})
-        local_peer = topology_data.get("local_peer", "")
-        
-        if not network_map:
-            map_text.insert(tk.END, "Network haritası henüz oluşturulmadı.\n")
-        else:
-            # ASCII art network haritası
-            map_text.insert(tk.END, f"📍 {local_peer} (Sen)\n")
-            
-            if local_peer in network_map:
-                connections = network_map[local_peer]
-                if connections:
-                    map_text.insert(tk.END, "├── Bağlantılar:\n")
-                    for peer_id, conn_info in connections.items():
-                        rtt = conn_info.get("rtt", 0)
-                        rtt_text = f"{rtt:.1f}ms" if rtt > 0 else "N/A"
-                        map_text.insert(tk.END, f"│   └── {peer_id} ({rtt_text})\n")
-                else:
-                    map_text.insert(tk.END, "└── Bağlantı yok\n")
-            
-            map_text.insert(tk.END, "\n🌐 Tüm Network:\n")
-            for peer_id, connections in network_map.items():
-                if peer_id != local_peer:
-                    map_text.insert(tk.END, f"📍 {peer_id}\n")
-                    if connections:
-                        for conn_peer, conn_info in connections.items():
-                            rtt = conn_info.get("rtt", 0)
-                            rtt_text = f"{rtt:.1f}ms" if rtt > 0 else "N/A"
-                            map_text.insert(tk.END, f"   └── {conn_peer} ({rtt_text})\n")
-                    else:
-                        map_text.insert(tk.END, "   └── Bağlantı yok\n")
-        
-        # Keşif zamanını ekle
-        discovery_time = topology_data.get("discovery_time", "N/A")
-        map_text.insert(tk.END, f"\n⏰ Son güncelleme: {discovery_time}")
-        
-        map_text.config(state=tk.DISABLED)
-    
+
     def refresh_user_list(self):
         """Bağlı kullanıcılar listesini güncelle"""
         # TCP sunucu ise direkt server'dan al

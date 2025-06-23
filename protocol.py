@@ -48,7 +48,8 @@ MAX_RETRIES = 2         # 2 deneme
 # Mesaj tipleri
 MESSAGE_TYPES = [
     "join", "message", "leave", "ack", "userlist", 
-    "ping", "pong", "topology_announce", "topology_request", "topology_response",
+    "ping", "pong", "peer_announce", "peer_request", "peer_list",
+    "ping_topology", "pong_topology",
     "private_message"  # UDP private messaging support
 ]
 

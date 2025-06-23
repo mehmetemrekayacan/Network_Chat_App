@@ -318,7 +318,7 @@ class UDPServer:
         """Eski kullanıcıları temizle"""
         while self.is_running:
             current_time = time.time()
-            timeout = 60  # 60 saniye timeout
+            timeout = 180  # 3 dakika timeout (daha uzun)
             
             with self.lock:
                 expired_clients = []
@@ -331,7 +331,7 @@ class UDPServer:
                     del self.clients[addr]
                     print(f"[T] Timeout: {username} ({addr})")
             
-            time.sleep(30)  # 30 saniyede bir kontrol
+            time.sleep(60)  # 1 dakikada bir kontrol (daha seyrek)
 
 if __name__ == "__main__":
     server = UDPServer()
