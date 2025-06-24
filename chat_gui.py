@@ -76,8 +76,17 @@ class SimpleChatApp:
 
     def setup_ui(self):
         """Sets up the main user interface layout."""
+        # This frame still fills the window, which is fine. The grid will be used inside it.
+        self.master.grid_rowconfigure(0, weight=1)
+        self.master.grid_columnconfigure(0, weight=1)
+        
         main_frame = customtkinter.CTkFrame(self.master, fg_color="transparent")
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        main_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        # Configure the grid to have one row and two columns
+        main_frame.grid_rowconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(0, weight=3)  # Chat area gets 3/4 of the space
+        main_frame.grid_columnconfigure(1, weight=1)  # Control panel gets 1/4 of the space
 
         # UI is split into a left chat area and a right control panel
         self.setup_chat_area(main_frame)
@@ -91,10 +100,12 @@ class SimpleChatApp:
             parent (customtkinter.CTkFrame): The parent widget for this area.
         """
         chat_frame = customtkinter.CTkFrame(parent)
-        chat_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        chat_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        chat_frame.grid_columnconfigure(0, weight=1)
+        chat_frame.grid_rowconfigure(1, weight=1) # Chat display row
 
         customtkinter.CTkLabel(chat_frame, text="💬 Chat Room",
-                               font=("Arial", 16, "bold")).pack(pady=10)
+                               font=("Arial", 16, "bold")).grid(row=0, column=0, pady=10, sticky="ew")
 
         # CTkTextbox widget for displaying messages
         self.chat_display = customtkinter.CTkTextbox(
@@ -103,15 +114,16 @@ class SimpleChatApp:
             wrap="word",
             state="disabled"
         )
-        self.chat_display.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.chat_display.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
 
         # --- Message Input Section ---
         msg_frame = customtkinter.CTkFrame(chat_frame, fg_color="transparent")
-        msg_frame.pack(fill="x", padx=10, pady=(0, 10))
+        msg_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
+        msg_frame.grid_columnconfigure(0, weight=1)
 
         # Radio buttons for selecting message type (Public/Private)
         msg_type_frame = customtkinter.CTkFrame(msg_frame, fg_color="transparent")
-        msg_type_frame.pack(fill="x", pady=(0, 5))
+        msg_type_frame.grid(row=0, column=0, sticky="w", pady=(0, 5))
         self.msg_type = tkinter.StringVar(value="public")
         customtkinter.CTkRadioButton(msg_type_frame, text="📢 Public (TCP)",
                                      variable=self.msg_type, value="public",
@@ -122,6 +134,7 @@ class SimpleChatApp:
 
         # Label to show the selected private message target
         self.private_target_frame = customtkinter.CTkFrame(msg_frame, fg_color="transparent")
+        # this frame will be gridded in update_message_mode
         customtkinter.CTkLabel(self.private_target_frame, text="🎯 Target:",
                                font=("Arial", 10)).pack(side="left")
         self.target_user_label = customtkinter.CTkLabel(self.private_target_frame, text="None",
@@ -130,16 +143,19 @@ class SimpleChatApp:
 
         # Message entry box and send button
         msg_input_frame = customtkinter.CTkFrame(msg_frame, fg_color="transparent")
-        msg_input_frame.pack(fill="x", pady=(5, 0))
+        msg_input_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        msg_input_frame.grid_columnconfigure(0, weight=1)
+        msg_input_frame.grid_columnconfigure(1, weight=0)
+
         self.message_entry = customtkinter.CTkEntry(
             msg_input_frame, font=("Arial", 11), placeholder_text="Type your message here..."
         )
-        self.message_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.message_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
         self.message_entry.bind("<Return>", self.send_message) # Allow sending with Enter key
         self.send_btn = customtkinter.CTkButton(
             msg_input_frame, text="Send", command=self.send_message, width=70
         )
-        self.send_btn.pack(side="right")
+        self.send_btn.grid(row=0, column=1, sticky="e")
 
     def setup_control_panel(self, parent):
         """
@@ -148,73 +164,82 @@ class SimpleChatApp:
         Args:
             parent (customtkinter.CTkFrame): The parent widget for this area.
         """
-        control_frame = customtkinter.CTkFrame(parent, width=280)
-        control_frame.pack(side="right", fill="y", padx=(5, 0))
-        control_frame.pack_propagate(False) # Prevent the frame from resizing to fit content
-
-        customtkinter.CTkLabel(control_frame, text="⚙️ Control Panel",
-                               font=("Arial", 16, "bold")).pack(pady=10)
+        control_frame = customtkinter.CTkScrollableFrame(parent, label_text="⚙️ Control Panel",
+                                                         label_font=("Arial", 16, "bold"))
+        control_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        control_frame.grid_columnconfigure(0, weight=1)
+        control_frame.grid_rowconfigure(6, weight=1) # The users_frame row will expand
 
         # Username input
         user_frame = customtkinter.CTkFrame(control_frame)
-        user_frame.pack(fill="x", padx=10, pady=(0, 10))
-        customtkinter.CTkLabel(user_frame, text="Username").pack(anchor="w", padx=10, pady=(5,0))
+        user_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(0, 10))
+        user_frame.grid_columnconfigure(0, weight=1)
+        customtkinter.CTkLabel(user_frame, text="Username").grid(row=0, column=0, sticky="w", padx=10, pady=(5,0))
         self.username_entry = customtkinter.CTkEntry(user_frame, placeholder_text="Enter your username")
-        self.username_entry.pack(fill="x", padx=10, pady=(0,10))
+        self.username_entry.grid(row=1, column=0, sticky="ew", padx=10, pady=(0,10))
 
         # Port information display
         port_info_frame = customtkinter.CTkFrame(control_frame)
-        port_info_frame.pack(fill="x", padx=10, pady=(0, 10))
-        customtkinter.CTkLabel(port_info_frame, text="Port Info").pack(anchor="w", padx=10, pady=(5,0))
+        port_info_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        port_info_frame.grid_columnconfigure(0, weight=1)
+        customtkinter.CTkLabel(port_info_frame, text="Port Info").grid(row=0, column=0, sticky="w", padx=10, pady=(5,0))
         customtkinter.CTkLabel(port_info_frame, text=f"📢 TCP Public Chat: {self.tcp_port}",
-                 font=("Arial", 9)).pack(anchor="w", padx=15, pady=2)
+                 font=("Arial", 9)).grid(row=1, column=0, sticky="w", padx=15, pady=2)
         customtkinter.CTkLabel(port_info_frame, text=f"🔒 UDP Private Msg: {self.udp_port}",
-                 font=("Arial", 9)).pack(anchor="w", padx=15, pady=(2,5))
+                 font=("Arial", 9)).grid(row=2, column=0, sticky="w", padx=15, pady=(2,5))
 
         # Connection controls
         server_frame = customtkinter.CTkFrame(control_frame)
-        server_frame.pack(fill="x", padx=10, pady=(0, 10))
-        customtkinter.CTkLabel(server_frame, text="Connection").pack(anchor="w", padx=10, pady=(5,0))
+        server_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
+        server_frame.grid_columnconfigure(0, weight=1)
+        customtkinter.CTkLabel(server_frame, text="Connection").grid(row=0, column=0, sticky="w", padx=10, pady=(5,0))
         self.auto_connect_btn = customtkinter.CTkButton(server_frame, text="🚀 Auto-Connect", command=self.auto_connect,
                                                         font=("Arial", 12, "bold"))
-        self.auto_connect_btn.pack(fill="x", pady=5, padx=10)
+        self.auto_connect_btn.grid(row=1, column=0, sticky="ew", pady=5, padx=10)
         self.disconnect_btn = customtkinter.CTkButton(server_frame, text="❌ Disconnect", command=self.disconnect_from_server,
                                                       fg_color="#DC3545", hover_color="#C82333")
-        self.disconnect_btn.pack(fill="x", pady=(0, 10), padx=10)
+        self.disconnect_btn.grid(row=2, column=0, sticky="ew", pady=(0, 10), padx=10)
 
         # Connection status label
         self.status_label = customtkinter.CTkLabel(control_frame, text="🔴 Disconnected", text_color="#DC3545")
-        self.status_label.pack(pady=5)
+        self.status_label.grid(row=3, column=0, sticky="ew", pady=5)
 
         # --- Performance Testing ---
         perf_frame = customtkinter.CTkFrame(control_frame)
-        perf_frame.pack(fill="x", padx=10, pady=10)
-        customtkinter.CTkLabel(perf_frame, text="📊 Performance Tests").pack(anchor="w", padx=10, pady=(5,0))
+        perf_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=10)
+        perf_frame.grid_columnconfigure(0, weight=1)
+        customtkinter.CTkLabel(perf_frame, text="📊 Performance Tests").grid(row=0, column=0, sticky="w", padx=10, pady=(5,0))
 
         self.rtt_btn = customtkinter.CTkButton(perf_frame, text="Test TCP Latency (RTT)", command=self.run_tcp_rtt_test)
-        self.rtt_btn.pack(fill="x", padx=10, pady=5)
+        self.rtt_btn.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
 
         self.throughput_btn = customtkinter.CTkButton(perf_frame, text="Test TCP Throughput", command=self.run_throughput_test)
-        self.throughput_btn.pack(fill="x", padx=10, pady=(0,10))
+        self.throughput_btn.grid(row=2, column=0, sticky="ew", padx=10, pady=(0,10))
 
         # Network topology button
         self.topology_btn = customtkinter.CTkButton(control_frame, text="🌐 View Network Peers", command=self.show_network_topology)
-        self.topology_btn.pack(fill="x", padx=10, pady=5)
+        self.topology_btn.grid(row=5, column=0, sticky="ew", padx=10, pady=5)
 
         # Connected users list
         users_frame = customtkinter.CTkFrame(control_frame)
-        users_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        customtkinter.CTkLabel(users_frame, text="👥 Connected Users").pack(anchor="w", padx=10, pady=(5,0))
+        users_frame.grid(row=6, column=0, sticky="nsew", padx=10, pady=5)
+        users_frame.grid_columnconfigure(0, weight=1)
+        users_frame.grid_rowconfigure(1, weight=1) # Scrollable listbox row
+
+        customtkinter.CTkLabel(users_frame, text="👥 Connected Users").grid(row=0, column=0, sticky="w", padx=10, pady=(5,0))
         self.users_listbox = customtkinter.CTkScrollableFrame(users_frame, label_text="")
-        self.users_listbox.pack(fill="both", expand=True, padx=10, pady=5)
+        self.users_listbox.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
 
         # User list controls
         user_ctrl_frame = customtkinter.CTkFrame(users_frame, fg_color="transparent")
-        user_ctrl_frame.pack(fill="x", padx=10, pady=(0, 5))
+        user_ctrl_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 5))
+        user_ctrl_frame.grid_columnconfigure(0, weight=1)
+        user_ctrl_frame.grid_columnconfigure(1, weight=0)
+
         customtkinter.CTkButton(user_ctrl_frame, text="🔄 Refresh", command=self.refresh_user_list,
-                                width=100).pack(side="left")
+                                width=100).grid(row=0, column=0, sticky="w")
         customtkinter.CTkButton(user_ctrl_frame, text="💬 Select Private", command=self.select_user_for_private,
-                                fg_color="#FF6B35", hover_color="#E05A2A", width=100).pack(side="right")
+                                fg_color="#FF6B35", hover_color="#E05A2A", width=100).grid(row=0, column=1, sticky="e")
 
         # Initial state setup
         self.refresh_user_list()
@@ -223,9 +248,9 @@ class SimpleChatApp:
     def update_message_mode(self):
         """Updates the UI to show or hide the private message target label."""
         if self.msg_type.get() == "private":
-            self.private_target_frame.pack(fill="x", pady=(0, 5))
+            self.private_target_frame.grid(row=1, column=0, sticky="w", pady=(0, 5))
         else:
-            self.private_target_frame.pack_forget()
+            self.private_target_frame.grid_remove()
 
     def select_user_for_private(self, event=None):
         """
@@ -644,16 +669,18 @@ class SimpleChatApp:
         topology_window = customtkinter.CTkToplevel(self.master)
         topology_window.title("Network Peer List")
         topology_window.geometry("600x500")
+        topology_window.grid_columnconfigure(0, weight=1)
+        topology_window.grid_rowconfigure(1, weight=1)
 
         customtkinter.CTkLabel(topology_window, text="🌐 Discovered Network Peers",
-                               font=("Arial", 16, "bold")).pack(pady=10)
+                               font=("Arial", 16, "bold")).grid(row=0, column=0, pady=10)
 
         # ScrolledText widget to display peer info
         peer_text = customtkinter.CTkTextbox(
             topology_window,
             font=("Courier", 11), height=20, state="disabled"
         )
-        peer_text.pack(fill="both", expand=True, padx=10, pady=5)
+        peer_text.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         
         # Auto-refreshing display logic using a closure
         def update_display():
@@ -698,7 +725,7 @@ class SimpleChatApp:
             customtkinter.CTkLabel(self.users_listbox, text="🔴 Not connected").pack(padx=5, pady=5)
         else:
             sorted_users = sorted(list(set(self.connected_users)))
-            for user in sorted_users:
+            for i, user in enumerate(sorted_users):
                 text = f"👤 {user} (You)" if user == self.current_username else f"👥 {user}"
                 btn = customtkinter.CTkButton(
                     self.users_listbox,
@@ -707,7 +734,7 @@ class SimpleChatApp:
                     anchor="w",
                     command=lambda u=user: self.select_user_from_list(u)
                 )
-                btn.pack(fill="x", padx=5, pady=2)
+                btn.grid(row=i, column=0, sticky="ew", padx=5, pady=2)
 
             if len(self.connected_users) <= 1:
                 customtkinter.CTkLabel(self.users_listbox, text="🔍 No other users online",
