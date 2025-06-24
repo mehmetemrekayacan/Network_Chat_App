@@ -757,7 +757,7 @@ class SimpleChatApp:
             messagebox.showwarning("Warning", "A throughput test is already in progress.")
             return
 
-        self.throughput_total_packets = 20  # Send a burst of 20 packets
+        self.throughput_total_packets = 200  # Send a burst of 200 packets
         self.throughput_packets_received = 0
         self.add_message(f"[Perf] 🚀 Starting TCP throughput test ({self.throughput_total_packets} x 512KB echo)...", "system")
         
