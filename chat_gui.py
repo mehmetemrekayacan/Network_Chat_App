@@ -1,12 +1,13 @@
 """
 Graphical User Interface for the Chat Application
 
-This module provides the main GUI for the chat application, built with Tkinter.
+This module provides the main GUI for the chat application, built with customtkinter.
 It integrates the TCP (public chat), UDP (private chat), and topology
 discovery services into a cohesive user interface.
 """
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+import customtkinter
+import tkinter
+from tkinter import messagebox
 import threading
 import time
 import socket
@@ -18,19 +19,9 @@ import udp_server
 import topology_discovery
 from protocol import build_packet, receive_packet, send_packet
 
-# A simple color theme for the GUI
-THEME = {
-    "bg": "#2B2B2B",
-    "panel_bg": "#3C3C3C",
-    "button_bg": "#007ACC",
-    "button_fg": "#FFFFFF",
-    "entry_bg": "#4D4D4D",
-    "text_color": "#FFFFFF",
-    "success": "#28A745",
-    "error": "#DC3545",
-    "muted": "#CCCCCC",
-    "private": "#FF6B35"
-}
+# Set the appearance and color theme for customtkinter
+customtkinter.set_appearance_mode("Dark")
+customtkinter.set_default_color_theme("blue")
 
 class SimpleChatApp:
     """
@@ -44,12 +35,11 @@ class SimpleChatApp:
         Initializes the SimpleChatApp.
 
         Args:
-            master (tk.Tk): The root Tkinter window.
+            master (customtkinter.CTk): The root customtkinter window.
         """
         self.master = master
         self.master.title("🎯 Network Chat Application - TCP/UDP & Topology Discovery")
         self.master.geometry("1000x700")
-        self.master.configure(bg=THEME["bg"])
 
         # Connection state variables
         self.tcp_server = None
@@ -86,8 +76,8 @@ class SimpleChatApp:
 
     def setup_ui(self):
         """Sets up the main user interface layout."""
-        main_frame = tk.Frame(self.master, bg=THEME["bg"])
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame = customtkinter.CTkFrame(self.master, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         # UI is split into a left chat area and a right control panel
         self.setup_chat_area(main_frame)
@@ -98,141 +88,133 @@ class SimpleChatApp:
         Sets up the left panel containing the chat display and message input.
 
         Args:
-            parent (tk.Frame): The parent widget for this area.
+            parent (customtkinter.CTkFrame): The parent widget for this area.
         """
-        chat_frame = tk.Frame(parent, bg=THEME["panel_bg"], relief="raised", bd=1)
-        chat_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        chat_frame = customtkinter.CTkFrame(parent)
+        chat_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
-        tk.Label(chat_frame, text="💬 Chat Room",
-                bg=THEME["panel_bg"], fg=THEME["text_color"],
-                font=("Arial", 14, "bold")).pack(pady=10)
+        customtkinter.CTkLabel(chat_frame, text="💬 Chat Room",
+                               font=("Arial", 16, "bold")).pack(pady=10)
 
-        # ScrolledText widget for displaying messages
-        self.chat_display = scrolledtext.ScrolledText(
+        # CTkTextbox widget for displaying messages
+        self.chat_display = customtkinter.CTkTextbox(
             chat_frame,
-            bg=THEME["bg"], fg=THEME["text_color"],
-            font=("Arial", 11),
-            wrap=tk.WORD,
-            state=tk.DISABLED
+            font=("Arial", 12),
+            wrap="word",
+            state="disabled"
         )
-        self.chat_display.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.chat_display.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # --- Message Input Section ---
-        msg_frame = tk.Frame(chat_frame, bg=THEME["panel_bg"])
-        msg_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        msg_frame = customtkinter.CTkFrame(chat_frame, fg_color="transparent")
+        msg_frame.pack(fill="x", padx=10, pady=(0, 10))
 
         # Radio buttons for selecting message type (Public/Private)
-        msg_type_frame = tk.Frame(msg_frame, bg=THEME["panel_bg"])
-        msg_type_frame.pack(fill=tk.X, pady=(0, 5))
-        self.msg_type = tk.StringVar(value="public")
-        tk.Radiobutton(msg_type_frame, text="📢 Public (TCP)",
-                      variable=self.msg_type, value="public",
-                      bg=THEME["panel_bg"], fg=THEME["text_color"],
-                      selectcolor=THEME["success"], activebackground=THEME["panel_bg"],
-                      command=self.update_message_mode).pack(side=tk.LEFT, padx=(0, 15))
-        tk.Radiobutton(msg_type_frame, text="🔒 Private (UDP)",
-                      variable=self.msg_type, value="private",
-                      bg=THEME["panel_bg"], fg=THEME["text_color"],
-                      selectcolor=THEME["private"], activebackground=THEME["panel_bg"],
-                      command=self.update_message_mode).pack(side=tk.LEFT)
+        msg_type_frame = customtkinter.CTkFrame(msg_frame, fg_color="transparent")
+        msg_type_frame.pack(fill="x", pady=(0, 5))
+        self.msg_type = tkinter.StringVar(value="public")
+        customtkinter.CTkRadioButton(msg_type_frame, text="📢 Public (TCP)",
+                                     variable=self.msg_type, value="public",
+                                     command=self.update_message_mode).pack(side="left", padx=(0, 15))
+        customtkinter.CTkRadioButton(msg_type_frame, text="🔒 Private (UDP)",
+                                     variable=self.msg_type, value="private",
+                                     command=self.update_message_mode).pack(side="left")
 
         # Label to show the selected private message target
-        self.private_target_frame = tk.Frame(msg_frame, bg=THEME["panel_bg"])
-        tk.Label(self.private_target_frame, text="🎯 Target:",
-                bg=THEME["panel_bg"], fg=THEME["text_color"],
-                font=("Arial", 10)).pack(side=tk.LEFT)
-        self.target_user_label = tk.Label(self.private_target_frame, text="None",
-                                         bg=THEME["panel_bg"], fg=THEME["private"],
-                                         font=("Arial", 10, "bold"))
-        self.target_user_label.pack(side=tk.LEFT, padx=(5, 0))
+        self.private_target_frame = customtkinter.CTkFrame(msg_frame, fg_color="transparent")
+        customtkinter.CTkLabel(self.private_target_frame, text="🎯 Target:",
+                               font=("Arial", 10)).pack(side="left")
+        self.target_user_label = customtkinter.CTkLabel(self.private_target_frame, text="None",
+                                                        font=("Arial", 10, "bold"), text_color="#FF6B35")
+        self.target_user_label.pack(side="left", padx=(5, 0))
 
         # Message entry box and send button
-        msg_input_frame = tk.Frame(msg_frame, bg=THEME["panel_bg"])
-        msg_input_frame.pack(fill=tk.X, pady=(5, 0))
-        self.message_entry = tk.Entry(
-            msg_input_frame, bg=THEME["entry_bg"], fg=THEME["text_color"], font=("Arial", 11)
+        msg_input_frame = customtkinter.CTkFrame(msg_frame, fg_color="transparent")
+        msg_input_frame.pack(fill="x", pady=(5, 0))
+        self.message_entry = customtkinter.CTkEntry(
+            msg_input_frame, font=("Arial", 11), placeholder_text="Type your message here..."
         )
-        self.message_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.message_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.message_entry.bind("<Return>", self.send_message) # Allow sending with Enter key
-        self.send_btn = tk.Button(
-            msg_input_frame, text="Send", command=self.send_message,
-            bg=THEME["button_bg"], fg=THEME["button_fg"], font=("Arial", 10)
+        self.send_btn = customtkinter.CTkButton(
+            msg_input_frame, text="Send", command=self.send_message, width=70
         )
-        self.send_btn.pack(side=tk.RIGHT)
+        self.send_btn.pack(side="right")
 
     def setup_control_panel(self, parent):
         """
         Sets up the right panel containing user controls, connection buttons, and user list.
 
         Args:
-            parent (tk.Frame): The parent widget for this area.
+            parent (customtkinter.CTkFrame): The parent widget for this area.
         """
-        control_frame = tk.Frame(parent, bg=THEME["panel_bg"], relief="raised", bd=1, width=250)
-        control_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+        control_frame = customtkinter.CTkFrame(parent, width=280)
+        control_frame.pack(side="right", fill="y", padx=(5, 0))
         control_frame.pack_propagate(False) # Prevent the frame from resizing to fit content
 
-        tk.Label(control_frame, text="⚙️ Control Panel",
-                bg=THEME["panel_bg"], fg=THEME["text_color"],
-                font=("Arial", 14, "bold")).pack(pady=10)
+        customtkinter.CTkLabel(control_frame, text="⚙️ Control Panel",
+                               font=("Arial", 16, "bold")).pack(pady=10)
 
         # Username input
-        user_frame = tk.LabelFrame(control_frame, text="Username", bg=THEME["panel_bg"], fg=THEME["text_color"])
-        user_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        self.username_entry = tk.Entry(user_frame, bg=THEME["entry_bg"], fg=THEME["text_color"])
-        self.username_entry.pack(fill=tk.X, padx=5, pady=5)
+        user_frame = customtkinter.CTkFrame(control_frame)
+        user_frame.pack(fill="x", padx=10, pady=(0, 10))
+        customtkinter.CTkLabel(user_frame, text="Username").pack(anchor="w", padx=10, pady=(5,0))
+        self.username_entry = customtkinter.CTkEntry(user_frame, placeholder_text="Enter your username")
+        self.username_entry.pack(fill="x", padx=10, pady=(0,10))
 
         # Port information display
-        port_info_frame = tk.LabelFrame(control_frame, text="Port Info", bg=THEME["panel_bg"], fg=THEME["text_color"])
-        port_info_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        tk.Label(port_info_frame, text=f"📢 TCP Public Chat: {self.tcp_port}",
-                 bg=THEME["panel_bg"], fg=THEME["text_color"], font=("Arial", 9)).pack(anchor="w", padx=5)
-        tk.Label(port_info_frame, text=f"🔒 UDP Private Msg: {self.udp_port}",
-                 bg=THEME["panel_bg"], fg=THEME["text_color"], font=("Arial", 9)).pack(anchor="w", padx=5)
+        port_info_frame = customtkinter.CTkFrame(control_frame)
+        port_info_frame.pack(fill="x", padx=10, pady=(0, 10))
+        customtkinter.CTkLabel(port_info_frame, text="Port Info").pack(anchor="w", padx=10, pady=(5,0))
+        customtkinter.CTkLabel(port_info_frame, text=f"📢 TCP Public Chat: {self.tcp_port}",
+                 font=("Arial", 9)).pack(anchor="w", padx=15, pady=2)
+        customtkinter.CTkLabel(port_info_frame, text=f"🔒 UDP Private Msg: {self.udp_port}",
+                 font=("Arial", 9)).pack(anchor="w", padx=15, pady=(2,5))
 
         # Connection controls
-        server_frame = tk.LabelFrame(control_frame, text="Connection", bg=THEME["panel_bg"], fg=THEME["text_color"])
-        server_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        self.auto_connect_btn = tk.Button(server_frame, text="🚀 Auto-Connect", command=self.auto_connect,
-                                          bg=THEME["success"], fg=THEME["button_fg"], font=("Arial", 11, "bold"))
-        self.auto_connect_btn.pack(fill=tk.X, pady=2, padx=5)
-        self.disconnect_btn = tk.Button(server_frame, text="❌ Disconnect", command=self.disconnect_from_server,
-                                        bg=THEME["error"], fg=THEME["button_fg"], font=("Arial", 10))
-        self.disconnect_btn.pack(fill=tk.X, pady=5, padx=5)
+        server_frame = customtkinter.CTkFrame(control_frame)
+        server_frame.pack(fill="x", padx=10, pady=(0, 10))
+        customtkinter.CTkLabel(server_frame, text="Connection").pack(anchor="w", padx=10, pady=(5,0))
+        self.auto_connect_btn = customtkinter.CTkButton(server_frame, text="🚀 Auto-Connect", command=self.auto_connect,
+                                                        font=("Arial", 12, "bold"))
+        self.auto_connect_btn.pack(fill="x", pady=5, padx=10)
+        self.disconnect_btn = customtkinter.CTkButton(server_frame, text="❌ Disconnect", command=self.disconnect_from_server,
+                                                      fg_color="#DC3545", hover_color="#C82333")
+        self.disconnect_btn.pack(fill="x", pady=(0, 10), padx=10)
 
         # Connection status label
-        self.status_label = tk.Label(control_frame, text="🔴 Disconnected", bg=THEME["panel_bg"], fg=THEME["error"])
-        self.status_label.pack(pady=10)
+        self.status_label = customtkinter.CTkLabel(control_frame, text="🔴 Disconnected", text_color="#DC3545")
+        self.status_label.pack(pady=5)
 
         # --- Performance Testing ---
-        perf_frame = tk.LabelFrame(control_frame, text="📊 Performance Tests", bg=THEME["panel_bg"], fg=THEME["text_color"])
-        perf_frame.pack(fill=tk.X, padx=10, pady=10)
+        perf_frame = customtkinter.CTkFrame(control_frame)
+        perf_frame.pack(fill="x", padx=10, pady=10)
+        customtkinter.CTkLabel(perf_frame, text="📊 Performance Tests").pack(anchor="w", padx=10, pady=(5,0))
 
-        self.rtt_btn = tk.Button(perf_frame, text="Test TCP Latency (RTT)", command=self.run_tcp_rtt_test)
-        self.rtt_btn.pack(fill=tk.X, padx=5, pady=2)
+        self.rtt_btn = customtkinter.CTkButton(perf_frame, text="Test TCP Latency (RTT)", command=self.run_tcp_rtt_test)
+        self.rtt_btn.pack(fill="x", padx=10, pady=5)
 
-        self.throughput_btn = tk.Button(perf_frame, text="Test TCP Throughput", command=self.run_throughput_test)
-        self.throughput_btn.pack(fill=tk.X, padx=5, pady=2)
+        self.throughput_btn = customtkinter.CTkButton(perf_frame, text="Test TCP Throughput", command=self.run_throughput_test)
+        self.throughput_btn.pack(fill="x", padx=10, pady=(0,10))
 
         # Network topology button
-        self.topology_btn = tk.Button(control_frame, text="🌐 View Network Peers", command=self.show_network_topology,
-                                      bg=THEME["button_bg"], fg=THEME["button_fg"])
-        self.topology_btn.pack(fill=tk.X, padx=10, pady=5)
+        self.topology_btn = customtkinter.CTkButton(control_frame, text="🌐 View Network Peers", command=self.show_network_topology)
+        self.topology_btn.pack(fill="x", padx=10, pady=5)
 
         # Connected users list
-        users_frame = tk.LabelFrame(control_frame, text="👥 Connected Users", bg=THEME["panel_bg"], fg=THEME["text_color"])
-        users_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        self.users_listbox = tk.Listbox(users_frame, bg=THEME["bg"], fg=THEME["text_color"],
-                                        font=("Arial", 10), height=8, selectbackground=THEME["button_bg"])
-        self.users_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self.users_listbox.bind("<Double-Button-1>", self.select_user_from_list)
+        users_frame = customtkinter.CTkFrame(control_frame)
+        users_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        customtkinter.CTkLabel(users_frame, text="👥 Connected Users").pack(anchor="w", padx=10, pady=(5,0))
+        self.users_listbox = customtkinter.CTkScrollableFrame(users_frame, label_text="")
+        self.users_listbox.pack(fill="both", expand=True, padx=10, pady=5)
 
         # User list controls
-        user_ctrl_frame = tk.Frame(users_frame, bg=THEME["panel_bg"])
-        user_ctrl_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
-        tk.Button(user_ctrl_frame, text="🔄 Refresh", command=self.refresh_user_list,
-                  bg=THEME["button_bg"], fg=THEME["button_fg"], font=("Arial", 9)).pack(side=tk.LEFT)
-        tk.Button(user_ctrl_frame, text="💬 Select Private", command=self.select_user_for_private,
-                  bg=THEME["private"], fg=THEME["button_fg"], font=("Arial", 9)).pack(side=tk.RIGHT)
+        user_ctrl_frame = customtkinter.CTkFrame(users_frame, fg_color="transparent")
+        user_ctrl_frame.pack(fill="x", padx=10, pady=(0, 5))
+        customtkinter.CTkButton(user_ctrl_frame, text="🔄 Refresh", command=self.refresh_user_list,
+                                width=100).pack(side="left")
+        customtkinter.CTkButton(user_ctrl_frame, text="💬 Select Private", command=self.select_user_for_private,
+                                fg_color="#FF6B35", hover_color="#E05A2A", width=100).pack(side="right")
 
         # Initial state setup
         self.refresh_user_list()
@@ -241,62 +223,47 @@ class SimpleChatApp:
     def update_message_mode(self):
         """Updates the UI to show or hide the private message target label."""
         if self.msg_type.get() == "private":
-            self.private_target_frame.pack(fill=tk.X, pady=(0, 5))
+            self.private_target_frame.pack(fill="x", pady=(0, 5))
         else:
             self.private_target_frame.pack_forget()
 
     def select_user_for_private(self, event=None):
         """
-        Selects a user for private messaging from the listbox.
-        If no user is selected in the list, it tries to select the first available user.
-
-        Args:
-            event: The event object from the button click (optional).
+        Selects the first available user (not self) for private messaging.
         """
         try:
-            selection = self.users_listbox.curselection()
-            if selection:
-                self.select_user_from_list()
-            else: # If no user is highlighted, pick the first one who isn't us
-                other_users = [u for u in self.connected_users if u != self.current_username]
-                if other_users:
-                    self.selected_user = other_users[0]
-                    self.target_user_label.config(text=self.selected_user)
-                    self.msg_type.set("private")
-                    self.update_message_mode()
-                    self.add_message(f"[System] 🎯 Private target set to: {self.selected_user}", "muted")
-                else:
-                    messagebox.showinfo("Info", "No other users are available for private messaging.")
+            # Pick the first one who isn't us
+            other_users = [u for u in self.connected_users if u != self.current_username]
+            if other_users:
+                self.selected_user = other_users[0]
+                self.target_user_label.configure(text=self.selected_user)
+                self.msg_type.set("private")
+                self.update_message_mode()
+                self.add_message(f"[System] 🎯 Private target set to: {self.selected_user}", "system")
+            else:
+                messagebox.showinfo("Info", "No other users are available for private messaging.")
         except Exception as e:
             self.add_message(f"[Error] Failed to select user: {e}", "error")
 
-    def select_user_from_list(self, event=None):
+    def select_user_from_list(self, username: str):
         """
-        Sets the selected user from the listbox as the private message target.
-        Triggered by double-clicking a user or the 'Select Private' button.
+        Sets the selected user from the list as the private message target.
+        Triggered by clicking a user's button in the list.
 
         Args:
-            event: The event object from the listbox click (optional).
+            username (str): The username of the user to select.
         """
         try:
-            selection = self.users_listbox.curselection()
-            if not selection: return
-
-            selected_line = self.users_listbox.get(selection[0])
-            # Parse the username, ignoring icons and "(You)"/"(Sen)" text
-            if " (You)" in selected_line or " (Sen)" in selected_line:
+            if username == self.current_username:
                 messagebox.showwarning("Warning", "You cannot send a private message to yourself.")
                 return
-            if "🔍" in selected_line or "🔴" in selected_line: return
 
-            username = selected_line.replace("👥 ", "").replace("👤 ", "").strip()
-
-            if username and username != self.current_username:
+            if username:
                 self.selected_user = username
-                self.target_user_label.config(text=username)
+                self.target_user_label.configure(text=username)
                 self.msg_type.set("private")
                 self.update_message_mode()
-                self.add_message(f"[System] 🎯 Private target set to: {username}", "muted")
+                self.add_message(f"[System] 🎯 Private target set to: {username}", "system")
             else:
                 messagebox.showwarning("Warning", "Please select a valid user.")
         except Exception as e:
@@ -308,9 +275,9 @@ class SimpleChatApp:
         try:
             with socket.create_connection(("localhost", self.server_port), timeout=2):
                 pass
-            self.add_message("[System] 🔍 A local server was found. Use 'Auto-Connect' to join.", "muted")
+            self.add_message("[System] 🔍 A local server was found. Use 'Auto-Connect' to join.", "system")
         except (socket.timeout, ConnectionRefusedError):
-            self.add_message("[System] 🚀 No local server found. Use 'Auto-Connect' to start one.", "muted")
+            self.add_message("[System] 🚀 No local server found. Use 'Auto-Connect' to start one.", "system")
 
     def auto_connect(self):
         """
@@ -327,10 +294,10 @@ class SimpleChatApp:
         try:
             with socket.create_connection(("localhost", self.server_port), timeout=2):
                 pass
-            self.add_message("[System] 🔗 Connecting to existing local server...", "muted")
+            self.add_message("[System] 🔗 Connecting to existing local server...", "system")
             self.connect_as_client()
         except (socket.timeout, ConnectionRefusedError):
-            self.add_message("[System] 🚀 Starting new server...", "muted")
+            self.add_message("[System] 🚀 Starting new server...", "system")
             self.start_as_server()
 
     def start_as_server(self):
@@ -353,7 +320,7 @@ class SimpleChatApp:
             self.udp_client_socket.sendto(udp_join_packet, ("localhost", self.udp_port))
 
             self.tcp_server = True
-            self.status_label.config(text="🟢 Server Mode (TCP+UDP)", fg=THEME["success"])
+            self.status_label.configure(text="🟢 Server Mode (TCP+UDP)", text_color="#28A745")
             self.connected_users = [self.current_username]
             self.refresh_user_list()
             self.add_message(f"[System] ✅ Server started as '{self.current_username}'", "success")
@@ -388,7 +355,7 @@ class SimpleChatApp:
             self.udp_client_socket.sendto(udp_join_packet, ("localhost", self.udp_port))
 
             self.is_client_mode = True
-            self.status_label.config(text="🟢 Client Mode (TCP+UDP)", fg=THEME["success"])
+            self.status_label.configure(text="🟢 Client Mode (TCP+UDP)", text_color="#28A745")
             self.add_message(f"[System] ✅ Connected as '{self.current_username}'", "success")
 
             # Start background listeners
@@ -435,13 +402,13 @@ class SimpleChatApp:
 
                     if msg_type == "message":
                         if sender == "SERVER":
-                            self.add_message(f"[System] {text}", "muted")
+                            self.add_message(f"[System] {text}", "system")
                         else: # Don't display our own echoed messages
                             self.add_message(f"{sender}: {text}")
                     elif msg_type == "userlist":
                         if "extra" in packet["payload"] and "users" in packet["payload"]["extra"]:
                             self.update_user_list(packet["payload"]["extra"]["users"])
-                            self.add_message("[System] User list updated.", "muted")
+                            self.add_message("[System] User list updated.", "system")
                     elif msg_type == "pong":
                         # RTT test pong received
                         ping_id = text
@@ -451,7 +418,7 @@ class SimpleChatApp:
                             self.rtt_results.append(rtt)
 
                             if len(self.rtt_results) % 10 == 0:
-                                self.add_message(f"[Perf] RTT progress: {len(self.rtt_results)}/50 pongs received.", "muted")
+                                self.add_message(f"[Perf] RTT progress: {len(self.rtt_results)}/50 pongs received.", "system")
 
                             if len(self.rtt_results) == 50:
                                 avg_rtt = sum(self.rtt_results) / len(self.rtt_results)
@@ -480,7 +447,7 @@ class SimpleChatApp:
                                     throughput_mbps = float('inf')
 
                                 self.add_message(f"[Perf] ✅ Throughput test complete.", "success")
-                                self.add_message(f"[Perf] Transfer of {total_data_megabytes:.2f} MB (round-trip) took {duration:.2f}s.", "muted")
+                                self.add_message(f"[Perf] Transfer of {total_data_megabytes:.2f} MB (round-trip) took {duration:.2f}s.", "system")
                                 self.add_message(f"[Perf] Effective throughput: {throughput_mbps:.2f} Mbps.", "success")
                                 
                                 # Reset test state
@@ -544,9 +511,9 @@ class SimpleChatApp:
         self.throughput_total_packets = 0
 
         # Reset UI elements
-        self.status_label.config(text="🔴 Disconnected", fg=THEME["error"])
-        self.target_user_label.config(text="None")
-        self.username_entry.config(state=tk.NORMAL) # Re-enable username entry
+        self.status_label.configure(text="🔴 Disconnected", text_color="#DC3545")
+        self.target_user_label.configure(text="None")
+        self.username_entry.configure(state="normal") # Re-enable username entry
         self.refresh_user_list()
         
         # Don't add a message if the root window is destroyed
@@ -568,7 +535,7 @@ class SimpleChatApp:
         else: # Private message
             self.send_private_message(message)
 
-        self.message_entry.delete(0, tk.END)
+        self.message_entry.delete(0, tkinter.END)
 
     def send_public_message(self, message: str):
         """
@@ -636,7 +603,7 @@ class SimpleChatApp:
                             self.add_message(f"{text}", "private")
                         elif msg_type == "message" and sender == "SERVER":
                             # These are system messages from the UDP server (e.g., confirmations, errors)
-                            self.add_message(f"[System] {text}", "muted")
+                            self.add_message(f"[System] {text}", "system")
             except socket.timeout:
                 continue # Normal, allows the loop to check `is_running`
             except Exception:
@@ -652,19 +619,20 @@ class SimpleChatApp:
             message (str): The message string to add.
             tag (str, optional): A tag for applying color, e.g., "error", "private".
         """
-        self.chat_display.config(state=tk.NORMAL)
+        if not self.master.winfo_exists(): return
+        self.chat_display.configure(state="normal")
         timestamp = time.strftime("%H:%M:%S")
 
         # Configure tags for colored text
-        self.chat_display.tag_config("error", foreground=THEME["error"])
-        self.chat_display.tag_config("success", foreground=THEME["success"])
-        self.chat_display.tag_config("muted", foreground=THEME["muted"])
-        self.chat_display.tag_config("private", foreground=THEME["private"])
+        self.chat_display.tag_config("error", foreground="#DC3545")
+        self.chat_display.tag_config("success", foreground="#28A745")
+        self.chat_display.tag_config("system", foreground="gray")
+        self.chat_display.tag_config("private", foreground="#FF6B35")
 
-        self.chat_display.insert(tk.END, f"[{timestamp}] ")
-        self.chat_display.insert(tk.END, f"{message}\n", tag)
-        self.chat_display.see(tk.END) # Scroll to bottom
-        self.chat_display.config(state=tk.DISABLED)
+        self.chat_display.insert("end", f"[{timestamp}] ")
+        self.chat_display.insert("end", f"{message}\n", tag)
+        self.chat_display.see("end") # Scroll to bottom
+        self.chat_display.configure(state="disabled")
     
     def show_network_topology(self):
         """Opens a new window to display the network peer list."""
@@ -673,20 +641,19 @@ class SimpleChatApp:
             return
 
         # Create the topology window
-        topology_window = tk.Toplevel(self.master)
+        topology_window = customtkinter.CTkToplevel(self.master)
         topology_window.title("Network Peer List")
         topology_window.geometry("600x500")
-        topology_window.configure(bg=THEME["bg"])
 
-        tk.Label(topology_window, text="🌐 Discovered Network Peers",
-                 bg=THEME["bg"], fg=THEME["text_color"], font=("Arial", 16, "bold")).pack(pady=10)
+        customtkinter.CTkLabel(topology_window, text="🌐 Discovered Network Peers",
+                               font=("Arial", 16, "bold")).pack(pady=10)
 
         # ScrolledText widget to display peer info
-        peer_text = scrolledtext.ScrolledText(
-            topology_window, bg=THEME["bg"], fg=THEME["text_color"],
-            font=("Courier", 11), height=20, state=tk.DISABLED
+        peer_text = customtkinter.CTkTextbox(
+            topology_window,
+            font=("Courier", 11), height=20, state="disabled"
         )
-        peer_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        peer_text.pack(fill="both", expand=True, padx=10, pady=5)
         
         # Auto-refreshing display logic using a closure
         def update_display():
@@ -694,20 +661,20 @@ class SimpleChatApp:
             
             peer_list = self.topology_discovery.get_peer_list()
             
-            peer_text.config(state=tk.NORMAL)
-            peer_text.delete(1.0, tk.END)
+            peer_text.configure(state="normal")
+            peer_text.delete(1.0, "end")
             
             if not peer_list:
-                peer_text.insert(tk.END, "🔍 Searching for other peers...")
+                peer_text.insert("end", "🔍 Searching for other peers...")
             else:
                 for peer in peer_list:
                     status_icon = "🟢" if peer["status"] == "active" else "🔴"
                     rtt_str = f"{peer['rtt']:.1f}ms" if peer.get('rtt', 0) > 0 else "N/A"
-                    peer_text.insert(tk.END, f"{status_icon} {peer['peer_id']}\n")
-                    peer_text.insert(tk.END, f"   ├─ Address: {peer['ip']}:{peer['port']}\n")
-                    peer_text.insert(tk.END, f"   └─ RTT: {rtt_str}\n\n")
+                    peer_text.insert("end", f"{status_icon} {peer['peer_id']}\n")
+                    peer_text.insert("end", f"   ├─ Address: {peer['ip']}:{peer['port']}\n")
+                    peer_text.insert("end", f"   └─ RTT: {rtt_str}\n\n")
             
-            peer_text.config(state=tk.DISABLED)
+            peer_text.configure(state="disabled")
             topology_window.after(3000, update_display) # Schedule next update
         
         update_display() # Initial call
@@ -722,19 +689,29 @@ class SimpleChatApp:
                 self.connected_users = [self.current_username] + connected_users
             except Exception:
                 self.connected_users = [self.current_username] if self.current_username else []
-        
-        self.users_listbox.delete(0, tk.END)
+
+        # Clear old widgets from the scrollable frame
+        for widget in self.users_listbox.winfo_children():
+            widget.destroy()
         
         if not self.current_username:
-            self.users_listbox.insert(tk.END, "🔴 Not connected")
+            customtkinter.CTkLabel(self.users_listbox, text="🔴 Not connected").pack(padx=5, pady=5)
         else:
-            for user in sorted(self.connected_users):
-                if user == self.current_username:
-                    self.users_listbox.insert(tk.END, f"👤 {user} (You)")
-                else:
-                    self.users_listbox.insert(tk.END, f"👥 {user}")
+            sorted_users = sorted(list(set(self.connected_users)))
+            for user in sorted_users:
+                text = f"👤 {user} (You)" if user == self.current_username else f"👥 {user}"
+                btn = customtkinter.CTkButton(
+                    self.users_listbox,
+                    text=text,
+                    fg_color="transparent",
+                    anchor="w",
+                    command=lambda u=user: self.select_user_from_list(u)
+                )
+                btn.pack(fill="x", padx=5, pady=2)
+
             if len(self.connected_users) <= 1:
-                self.users_listbox.insert(tk.END, "🔍 No other users online")
+                customtkinter.CTkLabel(self.users_listbox, text="🔍 No other users online",
+                                       text_color="gray").pack(padx=5, pady=5)
     
     def update_user_list(self, users: list):
         """
@@ -754,7 +731,7 @@ class SimpleChatApp:
 
         self.rtt_tests.clear()
         self.rtt_results.clear()
-        self.add_message("[Perf] 🚀 Starting TCP RTT test (50 pings)...", "muted")
+        self.add_message("[Perf] 🚀 Starting TCP RTT test (50 pings)...", "system")
 
         def test_thread():
             try:
@@ -782,7 +759,7 @@ class SimpleChatApp:
 
         self.throughput_total_packets = 20  # Send a burst of 20 packets
         self.throughput_packets_received = 0
-        self.add_message(f"[Perf] 🚀 Starting TCP throughput test ({self.throughput_total_packets} x 512KB echo)...", "muted")
+        self.add_message(f"[Perf] 🚀 Starting TCP throughput test ({self.throughput_total_packets} x 512KB echo)...", "system")
         
         def test_thread():
             try:
@@ -806,7 +783,7 @@ class SimpleChatApp:
 # Main application entry point
 if __name__ == "__main__":
     try:
-        root = tk.Tk()
+        root = customtkinter.CTk()
         app = SimpleChatApp(root)
         
         # Ensure graceful shutdown
