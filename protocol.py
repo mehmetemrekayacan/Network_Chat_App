@@ -33,6 +33,7 @@ Message Types:
 - peer_announce, peer_request, peer_list: For topology discovery.
 - ping_topology, pong_topology: For RTT measurement in topology discovery.
 - throughput_echo: For TCP throughput testing.
+- userlist_request: For clients to request the user list.
 
 UDP Reliability:
 To ensure reliable message delivery over UDP, the protocol uses:
@@ -60,7 +61,8 @@ MESSAGE_TYPES = [
     "ping", "pong", "peer_announce", "peer_request", "peer_list",
     "ping_topology", "pong_topology",
     "private_message",  # UDP private messaging support
-    "throughput_echo" # For TCP throughput testing
+    "throughput_echo", # For TCP throughput testing
+    "userlist_request" # For clients to request the user list
 ]
 
 def build_packet(sender: str, msg_type: str, text: str = "",

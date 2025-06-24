@@ -17,26 +17,32 @@ This project is a full-featured network chat application built with Python. It s
 
 ## 3. How to Run the Application
 
-This application is built with Python's standard libraries, so no external packages are needed.
+This application requires a dedicated server to be running before clients can connect.
 
 ### Prerequisites
 - Python 3.x
 
 ### Running the Application
-1.  **Open your terminal or command prompt.**
-2.  **Navigate to the project directory** where the files are located.
+1.  **Start the Server:**
+    - Open your terminal or command prompt.
+    - Navigate to the project directory.
+    - Run the `start_server.py` script. This will launch the TCP and UDP servers.
     ```sh
-    cd path/to/your/project/folder
+    python start_server.py
     ```
-3.  **Run the `chat_gui.py` file** using Python.
+    - The server will remain running in this terminal window.
+
+2.  **Start the Client(s):**
+    - Open a **new** terminal for each client you want to run.
+    - Navigate to the project directory.
+    - Run the `chat_gui.py` file using Python.
     ```sh
     python chat_gui.py
     ```
-4.  The application window will open. You can now start the server or connect to one.
+    - The application window will open. You can launch multiple clients this way.
 
 ### How to Use
-1.  **Enter a username** in the "Username" field.
-2.  Click **"🚀 Auto-Connect"**.
-    - If no server is running on your local network, this instance will become the server.
-    - If a server is already running, this instance will connect as a client.
-3.  You can open multiple instances of the application to simulate a chat between different users on the same machine. 
+1.  On each client window, **enter a unique username** in the "Username" field.
+2.  Click **"🚀 Connect"**.
+    - This will connect the client to the dedicated server.
+3.  You can now chat in the public room, or select users for private messaging. 

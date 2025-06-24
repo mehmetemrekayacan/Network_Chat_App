@@ -23,11 +23,6 @@ clients = {}      # Dictionary to store connected clients -> {client_socket: (us
 lock = threading.Lock()  # A lock to ensure thread-safe access to the clients dictionary
 server_socket = None     # The main server socket object
 is_running = False       # A flag to control the main server loop
-server_username = None   # The username of the user hosting the server
-
-# A queue to pass messages from client threads to the server's main/GUI thread
-server_message_queue = []
-server_queue_lock = threading.Lock() # A lock for thread-safe access to the message queue
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -90,9 +85,9 @@ def handle_client(client_socket, client_address):
             clients[client_socket] = (username, client_address[0])
 
         # Announce the new user to the chat and send the updated user list.
-        broadcast_user_list()
         join_notification = f"{username} has joined the chat."
         broadcast(build_packet("SERVER", "message", join_notification), exclude=[client_socket])
+        broadcast_user_list() # Send updated list to everyone
         logging.info(f"{username} joined from {client_address}")
 
         # Main loop to listen for messages from the client
@@ -108,29 +103,25 @@ def handle_client(client_socket, client_address):
 
                 msg_type = packet["header"]["type"]
                 sender = packet["header"]["sender"]
-                text = packet["payload"]["text"]
-
+                
                 if msg_type == "message":
-                    # Add the message to the server's GUI queue
-                    with server_queue_lock:
-                        server_message_queue.append({
-                            "type": "message",
-                            "sender": sender,
-                            "text": text,
-                            "timestamp": time.time()
-                        })
+                    text = packet["payload"]["text"]
                     # Broadcast the message to all OTHER clients
                     broadcast(build_packet(sender, "message", text), exclude=[client_socket])
+                    logging.info(f"Broadcast message from {sender}")
                 elif msg_type == "leave":
                     break  # Client has sent a leave notification
                 elif msg_type == "ping":
                     # Respond to a ping with a pong, echoing the text for RTT measurement
+                    text = packet["payload"]["text"]
                     pong_packet = build_packet("SERVER", "pong", text)
                     send_packet(client_socket, pong_packet)
                 elif msg_type == "throughput_echo":
                     # Echo the packet back to the sender for throughput testing.
                     # Send the raw data back, but framed with our protocol.
                     send_packet(client_socket, raw_data)
+                elif msg_type == "userlist_request":
+                    broadcast_user_list(target_socket=client_socket)
 
             except (ConnectionResetError, ConnectionAbortedError):
                 logging.warning(f"Client {username} disconnected unexpectedly.")
@@ -156,7 +147,7 @@ def handle_client(client_socket, client_address):
         if username:
             leave_notification = f"{username} has left the chat."
             broadcast(build_packet("SERVER", "message", leave_notification))
-            broadcast_user_list()
+            broadcast_user_list() # Send updated list to everyone
             logging.info(f"{username} disconnected.")
         else:
             logging.info(f"Connection terminated: {client_address}")
@@ -190,31 +181,19 @@ def broadcast(message: bytes, exclude: list = None):
 def set_server_username(username: str):
     """
     Sets the username for the server host.
-
-    This is used to include the server's own user in the user list.
-
-    Args:
-        username (str): The username of the server host.
+    This is no longer needed for a dedicated server.
     """
-    global server_username
-    server_username = username
+    pass
 
 
-def broadcast_user_list():
+def broadcast_user_list(target_socket=None):
     """
-    Builds and sends an updated user list to all connected clients.
-
-    It also pushes a user list update to the server's message queue for the GUI.
+    Builds and sends an updated user list to all connected clients,
+    or to a specific client if target_socket is provided.
     """
-    global server_username
     with lock:
         # Get a list of usernames from connected clients
-        client_users = [userinfo[0] for userinfo in clients.values()]
-
-        # Add the server's own username to the list
-        all_users = client_users.copy()
-        if server_username and server_username not in all_users:
-            all_users.append(server_username)
+        all_users = [userinfo[0] for userinfo in clients.values()]
 
         # Build the userlist packet
         userlist_packet = build_packet(
@@ -222,20 +201,21 @@ def broadcast_user_list():
             f"Connected users: {', '.join(all_users)}",
             extra={"users": all_users}
         )
-        # Send the list to every client
-        for client in list(clients.keys()):
+        
+        if target_socket:
+            # Send the list only to the requesting client
             try:
-                send_packet(client, userlist_packet)
+                send_packet(target_socket, userlist_packet)
             except Exception:
+                # The cleanup logic in handle_client will take care of removal.
                 pass
-
-        # Also, update the server's internal message queue for its own GUI
-        with server_queue_lock:
-            server_message_queue.append({
-                "type": "userlist",
-                "users": client_users,  # The GUI only needs the list of other clients
-                "timestamp": time.time()
-            })
+        else:
+            # Send the list to every client
+            for client in list(clients.keys()):
+                try:
+                    send_packet(client, userlist_packet)
+                except Exception:
+                    pass
 
 
 def start_server_with_port(port=12345):
@@ -293,17 +273,9 @@ def start_server():
 
 def get_server_messages() -> list:
     """
-    Retrieves all pending messages from the server's queue for the GUI.
-
-    This function is thread-safe.
-
-    Returns:
-        list: A copy of the messages in the queue. The queue is cleared after retrieval.
+    This is no longer needed for a dedicated server.
     """
-    with server_queue_lock:
-        messages = server_message_queue.copy()
-        server_message_queue.clear()
-        return messages
+    return []
 
 
 def get_connected_users() -> list:

@@ -3,7 +3,7 @@ Graphical User Interface for the Chat Application
 
 This module provides the main GUI for the chat application, built with customtkinter.
 It integrates the TCP (public chat), UDP (private chat), and topology
-discovery services into a cohesive user interface.
+discovery services into a cohesive user interface. It operates purely as a client.
 """
 import customtkinter
 import tkinter
@@ -38,22 +38,16 @@ class SimpleChatApp:
             master (customtkinter.CTk): The root customtkinter window.
         """
         self.master = master
-        self.master.title("🎯 Network Chat Application - TCP/UDP & Topology Discovery")
+        self.master.title("🎯 Network Chat Client - TCP/UDP & Topology Discovery")
         self.master.geometry("1000x700")
 
         # Connection state variables
-        self.tcp_server = None
-        self.udp_server = None
-        self.tcp_server_thread = None
-        self.udp_server_thread = None
+        self.is_connected = False
+        self.tcp_client_socket = None
+        self.udp_client_socket = None
 
         # Topology discovery module instance
         self.topology_discovery = topology_discovery.topology_discovery
-
-        # Client mode state variables
-        self.tcp_client_socket = None
-        self.udp_client_socket = None
-        self.is_client_mode = False
 
         # User and session data
         self.current_username = ""
@@ -63,7 +57,7 @@ class SimpleChatApp:
         # UI components and config
         self.tcp_port = 12345
         self.udp_port = 12346
-        self.server_port = self.tcp_port  # For backward compatibility
+        self.server_ip = "127.0.0.1" # Server IP, can be changed
 
         # Performance test state
         self.rtt_tests = {}
@@ -193,9 +187,9 @@ class SimpleChatApp:
         server_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
         server_frame.grid_columnconfigure(0, weight=1)
         customtkinter.CTkLabel(server_frame, text="Connection").grid(row=0, column=0, sticky="w", padx=10, pady=(5,0))
-        self.auto_connect_btn = customtkinter.CTkButton(server_frame, text="🚀 Auto-Connect", command=self.auto_connect,
+        self.connect_btn = customtkinter.CTkButton(server_frame, text="🚀 Connect", command=self.connect_to_server,
                                                         font=("Arial", 12, "bold"))
-        self.auto_connect_btn.grid(row=1, column=0, sticky="ew", pady=5, padx=10)
+        self.connect_btn.grid(row=1, column=0, sticky="ew", pady=5, padx=10)
         self.disconnect_btn = customtkinter.CTkButton(server_frame, text="❌ Disconnect", command=self.disconnect_from_server,
                                                       fg_color="#DC3545", hover_color="#C82333")
         self.disconnect_btn.grid(row=2, column=0, sticky="ew", pady=(0, 10), padx=10)
@@ -236,14 +230,14 @@ class SimpleChatApp:
         user_ctrl_frame.grid_columnconfigure(0, weight=1)
         user_ctrl_frame.grid_columnconfigure(1, weight=0)
 
-        customtkinter.CTkButton(user_ctrl_frame, text="🔄 Refresh", command=self.refresh_user_list,
+        customtkinter.CTkButton(user_ctrl_frame, text="🔄 Refresh", command=self.request_user_list,
                                 width=100).grid(row=0, column=0, sticky="w")
         customtkinter.CTkButton(user_ctrl_frame, text="💬 Select Private", command=self.select_user_for_private,
                                 fg_color="#FF6B35", hover_color="#E05A2A", width=100).grid(row=0, column=1, sticky="e")
 
         # Initial state setup
         self.refresh_user_list()
-        threading.Thread(target=self.check_server_on_startup, daemon=True).start()
+        self.add_message("[System] 🚀 Welcome! Please enter a username and connect to the server.", "system")
 
     def update_message_mode(self):
         """Updates the UI to show or hide the private message target label."""
@@ -294,82 +288,25 @@ class SimpleChatApp:
         except Exception as e:
             self.add_message(f"[Error] Failed to select user from list: {e}", "error")
 
-    def check_server_on_startup(self):
-        """Checks if a local server is running at startup and informs the user."""
-        time.sleep(1) # Wait for GUI to load
-        try:
-            with socket.create_connection(("localhost", self.server_port), timeout=2):
-                pass
-            self.add_message("[System] 🔍 A local server was found. Use 'Auto-Connect' to join.", "system")
-        except (socket.timeout, ConnectionRefusedError):
-            self.add_message("[System] 🚀 No local server found. Use 'Auto-Connect' to start one.", "system")
-
-    def auto_connect(self):
+    def connect_to_server(self):
         """
-        Core connection logic: starts as a server if none is found,
-        otherwise connects as a client.
+        Core connection logic: connects to the server as a client.
         """
         username = self.username_entry.get().strip()
         if not username:
             messagebox.showerror("Error", "Please enter a username first.")
             return
+        if self.is_connected:
+            messagebox.showinfo("Info", "You are already connected.")
+            return
+
         self.current_username = username
 
-        # Check for an existing server on the local machine
-        try:
-            with socket.create_connection(("localhost", self.server_port), timeout=2):
-                pass
-            self.add_message("[System] 🔗 Connecting to existing local server...", "system")
-            self.connect_as_client()
-        except (socket.timeout, ConnectionRefusedError):
-            self.add_message("[System] 🚀 Starting new server...", "system")
-            self.start_as_server()
-
-    def start_as_server(self):
-        """Starts the TCP and UDP servers and configures the app for server mode."""
-        try:
-            # Start TCP public chat server
-            self.tcp_server_thread = threading.Thread(target=self._start_tcp_server, daemon=True)
-            self.tcp_server_thread.start()
-
-            # Start UDP private message server
-            self.udp_server = udp_server.UDPServer(port=self.udp_port)
-            self.udp_server_thread = threading.Thread(target=self.udp_server.start, daemon=True)
-            self.udp_server_thread.start()
-
-            # The server host also needs a UDP socket to send private messages
-            self.udp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # Register the server host itself as a UDP client
-            time.sleep(0.5) # Wait for UDP server to bind
-            udp_join_packet = build_packet(self.current_username, "join", "joined")
-            self.udp_client_socket.sendto(udp_join_packet, ("localhost", self.udp_port))
-
-            self.tcp_server = True
-            self.status_label.configure(text="🟢 Server Mode (TCP+UDP)", text_color="#28A745")
-            self.connected_users = [self.current_username]
-            self.refresh_user_list()
-            self.add_message(f"[System] ✅ Server started as '{self.current_username}'", "success")
-
-            # Start background listeners
-            threading.Thread(target=self.server_message_listener, daemon=True).start()
-            threading.Thread(target=self.udp_private_listener, daemon=True).start()
-
-            # Start peer discovery service
-            self.topology_discovery.start_discovery(self.current_username)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to start server: {e}")
-
-    def _start_tcp_server(self):
-        """Helper function to run the TCP server in a thread."""
-        server.set_server_username(self.current_username)
-        server.start_server_with_port(self.server_port)
-
-    def connect_as_client(self):
-        """Connects to the existing servers as a client."""
         try:
             # Establish TCP connection for public chat
+            self.add_message(f"[System] 🔗 Connecting to server at {self.server_ip}...", "system")
             self.tcp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.tcp_client_socket.connect(("localhost", self.server_port))
+            self.tcp_client_socket.connect((self.server_ip, self.tcp_port))
             tcp_join_packet = build_packet(self.current_username, "join", "joined")
             send_packet(self.tcp_client_socket, tcp_join_packet)
 
@@ -377,10 +314,10 @@ class SimpleChatApp:
             self.udp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             # Register with the UDP server
             udp_join_packet = build_packet(self.current_username, "join", "joined")
-            self.udp_client_socket.sendto(udp_join_packet, ("localhost", self.udp_port))
+            self.udp_client_socket.sendto(udp_join_packet, (self.server_ip, self.udp_port))
 
-            self.is_client_mode = True
-            self.status_label.configure(text="🟢 Client Mode (TCP+UDP)", text_color="#28A745")
+            self.is_connected = True
+            self.status_label.configure(text="🟢 Connected to Server", text_color="#28A745")
             self.add_message(f"[System] ✅ Connected as '{self.current_username}'", "success")
 
             # Start background listeners
@@ -389,30 +326,16 @@ class SimpleChatApp:
 
             # Start peer discovery service
             self.topology_discovery.start_discovery(self.current_username)
+            # The server will automatically send the user list upon join.
+            # self.request_user_list()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to connect to server: {e}")
-
-    def server_message_listener(self):
-        """
-        Listens for messages from the server module's queue.
-        (For server-host only)
-        """
-        while self.tcp_server:
-            try:
-                for msg in server.get_server_messages():
-                    if msg["type"] == "message" and msg["sender"] != self.current_username:
-                        self.add_message(f"{msg['sender']}: {msg['text']}")
-                    elif msg["type"] == "userlist":
-                        all_users = [self.current_username] + msg["users"]
-                        self.update_user_list(all_users)
-                time.sleep(0.1)
-            except Exception:
-                break
+            self.disconnect_from_server()
 
     def client_message_listener(self):
-        """Listens for incoming TCP messages from the server. (For clients only)"""
+        """Listens for incoming TCP messages from the server."""
         from protocol import parse_packet
-        while self.is_client_mode and self.tcp_client_socket:
+        while self.is_connected and self.tcp_client_socket:
             try:
                 data = receive_packet(self.tcp_client_socket)
                 if not data:
@@ -480,38 +403,28 @@ class SimpleChatApp:
                                 self.throughput_packets_received = 0
                                 self.throughput_total_packets = 0
             except Exception:
-                if self.is_client_mode:
+                if self.is_connected:
                     self.add_message("[System] ❌ Connection error.", "error")
                 break
 
     def disconnect_from_server(self):
-        """Handles disconnection from servers and resets the application state."""
-        if not self.current_username: return # Already disconnected
+        """Handles disconnection from the server and resets the application state."""
+        if not self.is_connected: return
 
         from protocol import build_packet
 
-        # A client should notify the server that it's leaving.
-        # The server host should not, as it will shut down the server anyway.
-        if self.is_client_mode:
-            try:
-                leave_packet = build_packet(self.current_username, "leave", "left")
-                if self.tcp_client_socket:
-                    send_packet(self.tcp_client_socket, leave_packet)
-                if self.udp_client_socket:
-                    self.udp_client_socket.sendto(leave_packet, ("localhost", self.udp_port))
-            except Exception as e:
-                # Use logging for errors that happen during shutdown
-                logging.error(f"Error sending leave packets: {e}")
-
-        # Stop server threads if we are the host
-        if self.tcp_server:
-            server.stop_server()
-            self.tcp_server = None
-        if self.udp_server:
-            self.udp_server.stop()
-            self.udp_server = None
+        # Notify the server that we are leaving.
+        try:
+            leave_packet = build_packet(self.current_username, "leave", "left")
+            if self.tcp_client_socket:
+                send_packet(self.tcp_client_socket, leave_packet)
+            if self.udp_client_socket:
+                self.udp_client_socket.sendto(leave_packet, (self.server_ip, self.udp_port))
+        except Exception as e:
+            # Use logging for errors that happen during shutdown
+            logging.error(f"Error sending leave packets: {e}")
         
-        # Always stop the discovery service
+        # Stop the discovery service
         self.topology_discovery.stop_discovery()
 
         # Close client sockets if they exist
@@ -521,7 +434,7 @@ class SimpleChatApp:
             self.udp_client_socket.close()
 
         # Reset all state variables
-        self.is_client_mode = False
+        self.is_connected = False
         self.tcp_client_socket = None
         self.udp_client_socket = None
         self.current_username = ""
@@ -551,7 +464,7 @@ class SimpleChatApp:
         """
         message = self.message_entry.get().strip()
         if not message: return
-        if not self.current_username:
+        if not self.is_connected:
             messagebox.showerror("Error", "You must be connected to send messages.")
             return
 
@@ -571,10 +484,7 @@ class SimpleChatApp:
         """
         try:
             packet = build_packet(self.current_username, "message", message)
-            if self.tcp_server: # If we are the server, broadcast it locally
-                server.broadcast(packet)
-                self.add_message(f"You (Public): {message}")
-            elif self.is_client_mode and self.tcp_client_socket: # If client, send to server
+            if self.is_connected and self.tcp_client_socket:
                 send_packet(self.tcp_client_socket, packet)
                 self.add_message(f"You (Public): {message}")
         except Exception as e:
@@ -599,7 +509,7 @@ class SimpleChatApp:
             formatted_text = f"@{self.selected_user}: {message}"
             packet = build_packet(self.current_username, "private_message", formatted_text)
             if self.udp_client_socket:
-                self.udp_client_socket.sendto(packet, ("localhost", self.udp_port))
+                self.udp_client_socket.sendto(packet, (self.server_ip, self.udp_port))
                 self.add_message(f"You -> {self.selected_user}: {message}", "private")
         except Exception as e:
             self.add_message(f"[Error] Failed to send private message: {e}", "error")
@@ -607,7 +517,7 @@ class SimpleChatApp:
     def udp_private_listener(self):
         """Listens for incoming UDP messages (private messages and server confirmations)."""
         from protocol import parse_packet, build_packet
-        while self.is_client_mode or self.tcp_server:
+        while self.is_connected:
             try:
                 if self.udp_client_socket:
                     self.udp_client_socket.settimeout(3.0) # Timeout to prevent blocking
@@ -630,9 +540,9 @@ class SimpleChatApp:
                             # These are system messages from the UDP server (e.g., confirmations, errors)
                             self.add_message(f"[System] {text}", "system")
             except socket.timeout:
-                continue # Normal, allows the loop to check `is_running`
+                continue # Normal, allows the loop to check `is_connected`
             except Exception:
-                if self.is_client_mode or self.tcp_server:
+                if self.is_connected:
                     pass # Suppress errors if we are shutting down
                 break
 
@@ -706,26 +616,31 @@ class SimpleChatApp:
         
         update_display() # Initial call
     
+    def request_user_list(self):
+        """Sends a request to the server to get the latest user list."""
+        if not self.is_connected:
+            self.refresh_user_list() # Just refresh the local view if not connected
+            return
+        
+        try:
+            packet = build_packet(self.current_username, "userlist_request", "")
+            if self.tcp_client_socket:
+                send_packet(self.tcp_client_socket, packet)
+        except Exception as e:
+            self.add_message(f"[Error] Failed to request user list: {e}", "error")
+
     def refresh_user_list(self):
         """Updates the user listbox with the current list of connected users."""
-        if self.tcp_server:
-            try:
-                # If we are the server, get the list from the server module
-                # and add our own username.
-                connected_users = server.get_connected_users()
-                self.connected_users = [self.current_username] + connected_users
-            except Exception:
-                self.connected_users = [self.current_username] if self.current_username else []
-
         # Clear old widgets from the scrollable frame
         for widget in self.users_listbox.winfo_children():
             widget.destroy()
         
         self.users_listbox.grid_columnconfigure(0, weight=1)
         
-        if not self.current_username:
+        if not self.is_connected:
             customtkinter.CTkLabel(self.users_listbox, text="🔴 Not connected").grid(row=0, column=0, padx=5, pady=5, sticky="ew")
         else:
+            # Use a set to ensure uniqueness, then sort
             sorted_users = sorted(list(set(self.connected_users)))
             for i, user in enumerate(sorted_users):
                 text = f"👤 {user} (You)" if user == self.current_username else f"👥 {user}"
@@ -750,12 +665,14 @@ class SimpleChatApp:
             users (list): The new list of usernames.
         """
         self.connected_users = users
+        if self.current_username not in self.connected_users:
+             self.connected_users.append(self.current_username)
         self.refresh_user_list()
 
     def run_tcp_rtt_test(self):
         """Runs a TCP latency test by sending 50 pings and measuring response time."""
-        if not self.is_client_mode or not self.tcp_client_socket:
-            messagebox.showwarning("Warning", "You must be connected as a client to run this test.")
+        if not self.is_connected or not self.tcp_client_socket:
+            messagebox.showwarning("Warning", "You must be connected to run this test.")
             return
 
         self.rtt_tests.clear()
@@ -778,8 +695,8 @@ class SimpleChatApp:
 
     def run_throughput_test(self):
         """Runs a TCP throughput test by sending a burst of large packets."""
-        if not self.is_client_mode or not self.tcp_client_socket:
-            messagebox.showwarning("Warning", "You must be connected as a client to run this test.")
+        if not self.is_connected or not self.tcp_client_socket:
+            messagebox.showwarning("Warning", "You must be connected to run this test.")
             return
         
         if self.throughput_start_time > 0:
