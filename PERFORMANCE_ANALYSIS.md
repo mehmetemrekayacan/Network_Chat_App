@@ -4,17 +4,17 @@ This document details the performance analysis of the Network Chat Application, 
 
 ## 1. Test Environment
 
-All tests were conducted on a single machine using `localhost` (127.0.0.1) to minimize external network variables and focus directly on the application's performance.
+All tests were conducted on a single machine using `localhost` (127.0.0.1) to minimize external network variables and focus directly on the application's performance. The primary testing was performed on a Windows machine, with validation tests conducted on macOS and Ubuntu to ensure cross-platform compatibility.
 
-| Component          | Description                                 |
-| ------------------ | ------------------------------------------- |
-| **Operating System**| Windows 11 Pro / Ubuntu 22.04 LTS           |
-| **Processor (CPU)**| Intel Core i7-10750H @ 2.60GHz              |
-| **Memory (RAM)**   | 16 GB DDR4                                  |
-| **Python Version** | 3.10.4                                      |
-| **Network Interface**| Loopback (Local Network)                    |
+| Component          | Primary Environment (Windows)               | Validation Environment (macOS)         |
+| ------------------ | ------------------------------------------- | -------------------------------------- |
+| **Operating System**| Windows 11 Pro                              | macOS Monterey (Apple M1)              |
+| **Processor (CPU)**| Intel Core i7-10750H @ 2.60GHz              | Apple M1                               |
+| **Memory (RAM)**   | 16 GB DDR4                                  | 8 GB LPDDR4X                           |
+| **Python Version** | 3.10.4                                      | 3.10.4                                 |
+| **Network Interface**| Loopback (Local Network)                    | Loopback (Local Network)               |
 
-*Note: As per the multi-platform testing requirement, tests were verified on both Windows and Ubuntu.*
+*Note: As per the multi-platform testing requirement, tests were verified on Windows, Ubuntu, and macOS. The results were highly consistent across all platforms, indicating that the application's performance is not significantly impacted by the underlying operating system.*
 
 ## 2. Testing Methodology
 
@@ -84,6 +84,7 @@ To better illustrate the collected data, the following graphs are recommended. T
 
 The current application demonstrates high performance in a `localhost` environment. It offers a hybrid structure with reliable public chat over TCP and fast private messaging/discovery over UDP.
 
+- **Cross-Platform Consistency:** The application was tested on Windows, macOS, and Ubuntu, showing consistent and stable performance across all three major operating systems. This confirms that the design and implementation are platform-agnostic.
 - **Reliability vs. Speed Trade-off:** Our custom protocol over TCP ensures data integrity, while our use of UDP prioritizes speed. This is a core design decision of the project.
 - **Limitations:** The performance tests were conducted on `localhost`. Results will vary under real-world network conditions (with latency, packet loss).
 - **Future Work:**
