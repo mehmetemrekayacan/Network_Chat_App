@@ -32,6 +32,7 @@ Message Types:
 - ping/pong: Used for checking connectivity (TCP).
 - peer_announce, peer_request, peer_list: For topology discovery.
 - ping_topology, pong_topology: For RTT measurement in topology discovery.
+- throughput_echo: For TCP throughput testing.
 
 UDP Reliability:
 To ensure reliable message delivery over UDP, the protocol uses:
@@ -44,10 +45,12 @@ import json
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
+import struct
+import socket
 
 # Protocol constants
 PROTOCOL_VERSION = "1.0"
-MAX_PACKET_SIZE = 1024  # 1KB, simple limit for packet size
+MAX_PACKET_SIZE = 1024 * 1024  # 1MB, simple limit for packet size
 RETRY_TIMEOUT = 5.0     # 5 seconds before resending a packet
 MAX_RETRIES = 2         # Number of retries before giving up
 
@@ -56,7 +59,8 @@ MESSAGE_TYPES = [
     "join", "message", "leave", "ack", "userlist",
     "ping", "pong", "peer_announce", "peer_request", "peer_list",
     "ping_topology", "pong_topology",
-    "private_message"  # UDP private messaging support
+    "private_message",  # UDP private messaging support
+    "throughput_echo" # For TCP throughput testing
 ]
 
 def build_packet(sender: str, msg_type: str, text: str = "",
@@ -105,6 +109,35 @@ def build_packet(sender: str, msg_type: str, text: str = "",
         raise ValueError(f"Packet is too large: {len(data)} bytes")
 
     return data
+
+def send_packet(sock: socket.socket, packet_bytes: bytes):
+    """Prepends a 4-byte length header and sends the packet over the socket."""
+    msg_len = len(packet_bytes)
+    # '!' for network byte order, 'I' for unsigned int (4 bytes)
+    header = struct.pack('!I', msg_len)
+    sock.sendall(header + packet_bytes)
+
+def receive_packet(sock: socket.socket) -> Optional[bytes]:
+    """Reads a packet with a 4-byte length prefix from the socket."""
+    # Read the header to determine the full message length
+    header_data = sock.recv(4)
+    if not header_data:
+        return None  # Connection closed
+
+    msg_len = struct.unpack('!I', header_data)[0]
+
+    # Read the message data in chunks until the full message is received
+    chunks = []
+    bytes_received = 0
+    while bytes_received < msg_len:
+        # Request a chunk of up to 4096 bytes, or the remaining amount if smaller
+        chunk = sock.recv(min(msg_len - bytes_received, 4096))
+        if not chunk:
+            raise ConnectionError("Socket connection broken while receiving data.")
+        chunks.append(chunk)
+        bytes_received += len(chunk)
+
+    return b''.join(chunks)
 
 def parse_packet(data: bytes) -> Optional[Dict[str, Any]]:
     """

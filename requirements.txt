@@ -1,0 +1,3 @@
+# This project uses Python's standard libraries (Tkinter, socket, etc.).
+# No external dependencies are required to be installed via pip.
+# You can run the application directly if you have Python installed. 

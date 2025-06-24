@@ -14,7 +14,7 @@ import time
 import logging
 from protocol import (
     build_packet, parse_packet, PROTOCOL_VERSION,
-    MAX_PACKET_SIZE
+    MAX_PACKET_SIZE, send_packet, receive_packet
 )
 
 # --- Globals ---
@@ -49,7 +49,7 @@ def handle_client(client_socket, client_address):
     username = None
     try:
         # The first message from a client must be a "join" packet.
-        join_data = client_socket.recv(MAX_PACKET_SIZE)
+        join_data = receive_packet(client_socket)
         if not join_data:
             return  # Empty data means connection closed
 
@@ -57,8 +57,8 @@ def handle_client(client_socket, client_address):
         if not join_packet or join_packet["header"]["type"] != "join":
             # If the packet is invalid or not a join packet, reject the connection.
             try:
-                error_msg = "First message must be a valid JOIN packet."
-                client_socket.send(build_packet("SERVER", "message", error_msg))
+                error_msg_packet = build_packet("SERVER", "message", "First message must be a valid JOIN packet.")
+                send_packet(client_socket, error_msg_packet)
             except Exception:
                 pass  # Ignore errors if the client has already disconnected
             return
@@ -69,7 +69,8 @@ def handle_client(client_socket, client_address):
             # Check if the server is full
             if len(clients) >= MAX_CLIENTS:
                 try:
-                    client_socket.send(build_packet("SERVER", "message", "Server is full."))
+                    full_msg_packet = build_packet("SERVER", "message", "Server is full.")
+                    send_packet(client_socket, full_msg_packet)
                 except Exception:
                     pass
                 logging.warning(f"Connection from {client_address} rejected: Server full.")
@@ -78,8 +79,8 @@ def handle_client(client_socket, client_address):
             # Check if the username is already taken
             if any(c[0] == username for c in clients.values()):
                 try:
-                    error_msg = f"Username '{username}' is already in use."
-                    client_socket.send(build_packet("SERVER", "message", error_msg))
+                    taken_msg_packet = build_packet("SERVER", "message", f"Username '{username}' is already in use.")
+                    send_packet(client_socket, taken_msg_packet)
                 except Exception:
                     pass
                 logging.warning(f"Connection from {username}@{client_address} rejected: Username taken.")
@@ -97,11 +98,11 @@ def handle_client(client_socket, client_address):
         # Main loop to listen for messages from the client
         while is_running:
             try:
-                data = client_socket.recv(MAX_PACKET_SIZE)
-                if not data:
+                raw_data = receive_packet(client_socket)
+                if not raw_data:
                     break  # Empty data means the client disconnected gracefully
 
-                packet = parse_packet(data)
+                packet = parse_packet(raw_data)
                 if not packet:
                     continue  # Ignore invalid packets
 
@@ -123,8 +124,13 @@ def handle_client(client_socket, client_address):
                 elif msg_type == "leave":
                     break  # Client has sent a leave notification
                 elif msg_type == "ping":
-                    # Respond to a ping with a pong to keep the connection alive
-                    client_socket.send(build_packet("SERVER", "pong", "Pong"))
+                    # Respond to a ping with a pong, echoing the text for RTT measurement
+                    pong_packet = build_packet("SERVER", "pong", text)
+                    send_packet(client_socket, pong_packet)
+                elif msg_type == "throughput_echo":
+                    # Echo the packet back to the sender for throughput testing.
+                    # Send the raw data back, but framed with our protocol.
+                    send_packet(client_socket, raw_data)
 
             except (ConnectionResetError, ConnectionAbortedError):
                 logging.warning(f"Client {username} disconnected unexpectedly.")
@@ -174,7 +180,7 @@ def broadcast(message: bytes, exclude: list = None):
             if client in exclude:
                 continue
             try:
-                client.send(message)
+                send_packet(client, message)
             except Exception:
                 # If sending fails, the client might have disconnected.
                 # The cleanup logic in handle_client will take care of removal.
@@ -219,7 +225,7 @@ def broadcast_user_list():
         # Send the list to every client
         for client in list(clients.keys()):
             try:
-                client.send(userlist_packet)
+                send_packet(client, userlist_packet)
             except Exception:
                 pass
 
@@ -336,7 +342,7 @@ def stop_server(finally_call=False):
         shutdown_msg = build_packet("SERVER", "message", "Server is shutting down...")
         for client in list(clients.keys()):
             try:
-                client.send(shutdown_msg)
+                send_packet(client, shutdown_msg)
                 client.close()
             except Exception:
                 pass

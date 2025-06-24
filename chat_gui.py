@@ -16,7 +16,7 @@ import logging
 import server
 import udp_server
 import topology_discovery
-from protocol import build_packet
+from protocol import build_packet, receive_packet, send_packet
 
 # A simple color theme for the GUI
 THEME = {
@@ -74,6 +74,13 @@ class SimpleChatApp:
         self.tcp_port = 12345
         self.udp_port = 12346
         self.server_port = self.tcp_port  # For backward compatibility
+
+        # Performance test state
+        self.rtt_tests = {}
+        self.rtt_results = []
+        self.throughput_start_time = 0
+        self.throughput_packets_received = 0
+        self.throughput_total_packets = 0
 
         self.setup_ui()
 
@@ -195,6 +202,16 @@ class SimpleChatApp:
         # Connection status label
         self.status_label = tk.Label(control_frame, text="🔴 Disconnected", bg=THEME["panel_bg"], fg=THEME["error"])
         self.status_label.pack(pady=10)
+
+        # --- Performance Testing ---
+        perf_frame = tk.LabelFrame(control_frame, text="📊 Performance Tests", bg=THEME["panel_bg"], fg=THEME["text_color"])
+        perf_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.rtt_btn = tk.Button(perf_frame, text="Test TCP Latency (RTT)", command=self.run_tcp_rtt_test)
+        self.rtt_btn.pack(fill=tk.X, padx=5, pady=2)
+
+        self.throughput_btn = tk.Button(perf_frame, text="Test TCP Throughput", command=self.run_throughput_test)
+        self.throughput_btn.pack(fill=tk.X, padx=5, pady=2)
 
         # Network topology button
         self.topology_btn = tk.Button(control_frame, text="🌐 View Network Peers", command=self.show_network_topology,
@@ -362,7 +379,7 @@ class SimpleChatApp:
             self.tcp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.tcp_client_socket.connect(("localhost", self.server_port))
             tcp_join_packet = build_packet(self.current_username, "join", "joined")
-            self.tcp_client_socket.send(tcp_join_packet)
+            send_packet(self.tcp_client_socket, tcp_join_packet)
 
             # Create a UDP socket for sending/receiving private messages
             self.udp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -402,10 +419,10 @@ class SimpleChatApp:
 
     def client_message_listener(self):
         """Listens for incoming TCP messages from the server. (For clients only)"""
-        from protocol import parse_packet, MAX_PACKET_SIZE
+        from protocol import parse_packet
         while self.is_client_mode and self.tcp_client_socket:
             try:
-                data = self.tcp_client_socket.recv(MAX_PACKET_SIZE)
+                data = receive_packet(self.tcp_client_socket)
                 if not data:
                     self.add_message("[System] ❌ Server connection lost.", "error")
                     break
@@ -425,6 +442,51 @@ class SimpleChatApp:
                         if "extra" in packet["payload"] and "users" in packet["payload"]["extra"]:
                             self.update_user_list(packet["payload"]["extra"]["users"])
                             self.add_message("[System] User list updated.", "muted")
+                    elif msg_type == "pong":
+                        # RTT test pong received
+                        ping_id = text
+                        if ping_id in self.rtt_tests:
+                            send_time = self.rtt_tests.pop(ping_id)
+                            rtt = (time.time() - send_time) * 1000  # in ms
+                            self.rtt_results.append(rtt)
+
+                            if len(self.rtt_results) % 10 == 0:
+                                self.add_message(f"[Perf] RTT progress: {len(self.rtt_results)}/50 pongs received.", "muted")
+
+                            if len(self.rtt_results) == 50:
+                                avg_rtt = sum(self.rtt_results) / len(self.rtt_results)
+                                self.add_message(f"[Perf] ✅ TCP RTT test complete. Average RTT: {avg_rtt:.2f} ms", "success")
+                    elif msg_type == "throughput_echo":
+                        # Throughput echo received
+                        if self.throughput_start_time > 0:
+                            self.throughput_packets_received += 1
+
+                            if self.throughput_packets_received == self.throughput_total_packets:
+                                end_time = time.time()
+                                duration = end_time - self.throughput_start_time
+                                
+                                # Calculate total data transferred based on one packet's size
+                                single_packet_size_bytes = len(data)
+                                total_data_bytes = single_packet_size_bytes * self.throughput_total_packets
+                                
+                                # Data travels client -> server -> client, so total distance is 2x
+                                total_data_megabits = (total_data_bytes * 2 * 8) / (1024 * 1024)
+                                total_data_megabytes = (total_data_bytes / (1024 * 1024)) * 2
+
+                                # Prevent division by zero
+                                if duration > 0:
+                                    throughput_mbps = total_data_megabits / duration
+                                else:
+                                    throughput_mbps = float('inf')
+
+                                self.add_message(f"[Perf] ✅ Throughput test complete.", "success")
+                                self.add_message(f"[Perf] Transfer of {total_data_megabytes:.2f} MB (round-trip) took {duration:.2f}s.", "muted")
+                                self.add_message(f"[Perf] Effective throughput: {throughput_mbps:.2f} Mbps.", "success")
+                                
+                                # Reset test state
+                                self.throughput_start_time = 0
+                                self.throughput_packets_received = 0
+                                self.throughput_total_packets = 0
             except Exception:
                 if self.is_client_mode:
                     self.add_message("[System] ❌ Connection error.", "error")
@@ -442,7 +504,7 @@ class SimpleChatApp:
             try:
                 leave_packet = build_packet(self.current_username, "leave", "left")
                 if self.tcp_client_socket:
-                    self.tcp_client_socket.send(leave_packet)
+                    send_packet(self.tcp_client_socket, leave_packet)
                 if self.udp_client_socket:
                     self.udp_client_socket.sendto(leave_packet, ("localhost", self.udp_port))
             except Exception as e:
@@ -473,6 +535,13 @@ class SimpleChatApp:
         self.current_username = ""
         self.connected_users = []
         self.selected_user = None
+
+        # Performance test state
+        self.rtt_tests.clear()
+        self.rtt_results.clear()
+        self.throughput_start_time = 0
+        self.throughput_packets_received = 0
+        self.throughput_total_packets = 0
 
         # Reset UI elements
         self.status_label.config(text="🔴 Disconnected", fg=THEME["error"])
@@ -514,7 +583,7 @@ class SimpleChatApp:
                 server.broadcast(packet)
                 self.add_message(f"You (Public): {message}")
             elif self.is_client_mode and self.tcp_client_socket: # If client, send to server
-                self.tcp_client_socket.send(packet)
+                send_packet(self.tcp_client_socket, packet)
                 self.add_message(f"You (Public): {message}")
         except Exception as e:
             self.add_message(f"[Error] Failed to send public message: {e}", "error")
@@ -676,6 +745,63 @@ class SimpleChatApp:
         """
         self.connected_users = users
         self.refresh_user_list()
+
+    def run_tcp_rtt_test(self):
+        """Runs a TCP latency test by sending 50 pings and measuring response time."""
+        if not self.is_client_mode or not self.tcp_client_socket:
+            messagebox.showwarning("Warning", "You must be connected as a client to run this test.")
+            return
+
+        self.rtt_tests.clear()
+        self.rtt_results.clear()
+        self.add_message("[Perf] 🚀 Starting TCP RTT test (50 pings)...", "muted")
+
+        def test_thread():
+            try:
+                for i in range(50):
+                    ping_id = f"rtt_{time.time()}"
+                    self.rtt_tests[ping_id] = time.time()
+                    # The ping text is used as a unique ID to match the pong
+                    packet = build_packet(self.current_username, "ping", text=ping_id)
+                    send_packet(self.tcp_client_socket, packet)
+                    time.sleep(0.1)  # 100ms interval between pings
+            except Exception as e:
+                self.add_message(f"[Error] RTT test failed: {e}", "error")
+
+        threading.Thread(target=test_thread, daemon=True).start()
+
+    def run_throughput_test(self):
+        """Runs a TCP throughput test by sending a burst of large packets."""
+        if not self.is_client_mode or not self.tcp_client_socket:
+            messagebox.showwarning("Warning", "You must be connected as a client to run this test.")
+            return
+        
+        if self.throughput_start_time > 0:
+            messagebox.showwarning("Warning", "A throughput test is already in progress.")
+            return
+
+        self.throughput_total_packets = 20  # Send a burst of 20 packets
+        self.throughput_packets_received = 0
+        self.add_message(f"[Perf] 🚀 Starting TCP throughput test ({self.throughput_total_packets} x 512KB echo)...", "muted")
+        
+        def test_thread():
+            try:
+                # Prepare a large payload.
+                data_size_bytes = 512 * 1024  # 512 KB
+                payload = "T" * data_size_bytes
+                packet = build_packet(self.current_username, "throughput_echo", text=payload)
+                
+                self.throughput_start_time = time.time()
+                for _ in range(self.throughput_total_packets):
+                    send_packet(self.tcp_client_socket, packet)
+            except Exception as e:
+                self.add_message(f"[Error] Throughput test failed: {e}", "error")
+                # Reset test state on failure
+                self.throughput_start_time = 0
+                self.throughput_packets_received = 0
+                self.throughput_total_packets = 0
+
+        threading.Thread(target=test_thread, daemon=True).start()
 
 # Main application entry point
 if __name__ == "__main__":
