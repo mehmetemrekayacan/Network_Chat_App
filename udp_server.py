@@ -348,27 +348,25 @@ class UDPServer:
                                          it will be built into a bytes object.
             addr (tuple): The destination address.
         """
-        # If the packet is a dictionary, build it into bytes first.
-        if isinstance(packet_data, dict):
-            packet_data = build_packet(
-                packet_data["header"]["sender"],
-                packet_data["header"]["type"],
-                packet_data["payload"]["text"],
-                extra=packet_data["payload"].get("extra")
-            )
-        
-        # Re-parse the packet to add a sequence number
+        if isinstance(packet_data, bytes):
+            packet = parse_packet(packet_data)
+            if not packet:
+                logging.error("Reliable send failed: could not parse byte data.")
+                return
+        else:
+            packet = packet_data
+
         seq = sequencer.get_next_seq()
-        packet = parse_packet(packet_data)
-        packet["header"]["seq"] = seq
+
+        # Build the final packet with all data and the new sequence number
         final_packet = build_packet(
-            packet["header"]["sender"],
-            packet["header"]["type"],
-            packet["payload"]["text"],
+            sender=packet["header"]["sender"],
+            msg_type=packet["header"]["type"],
+            text=packet["payload"].get("text", ""),
             seq=seq,
             extra=packet["payload"].get("extra")
         )
-        
+
         try:
             self.sock.sendto(final_packet, addr)
             # Add to the pending list for retry mechanism

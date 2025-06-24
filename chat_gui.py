@@ -721,8 +721,10 @@ class SimpleChatApp:
         for widget in self.users_listbox.winfo_children():
             widget.destroy()
         
+        self.users_listbox.grid_columnconfigure(0, weight=1)
+        
         if not self.current_username:
-            customtkinter.CTkLabel(self.users_listbox, text="🔴 Not connected").pack(padx=5, pady=5)
+            customtkinter.CTkLabel(self.users_listbox, text="🔴 Not connected").grid(row=0, column=0, padx=5, pady=5, sticky="ew")
         else:
             sorted_users = sorted(list(set(self.connected_users)))
             for i, user in enumerate(sorted_users):
@@ -736,9 +738,9 @@ class SimpleChatApp:
                 )
                 btn.grid(row=i, column=0, sticky="ew", padx=5, pady=2)
 
-            if len(self.connected_users) <= 1:
+            if len(sorted_users) <= 1:
                 customtkinter.CTkLabel(self.users_listbox, text="🔍 No other users online",
-                                       text_color="gray").pack(padx=5, pady=5)
+                                       text_color="gray").grid(row=len(sorted_users), column=0, padx=5, pady=5, sticky="ew")
     
     def update_user_list(self, users: list):
         """
