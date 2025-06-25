@@ -9,7 +9,7 @@ A multi-user network chat application with a rich user interface, featuring publ
 
 *You can add one or more screenshots here showing the application's interface, user list, and chat screen. This is a great way to showcase what your project looks like visually.*
 
-![image](https://user-images.githubusercontent.com/12345/67890.png)
+![GUI Screenshot](./image_gui.png)
 
 ## 🚀 About This Project
 
