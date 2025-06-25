@@ -1,32 +1,58 @@
-# Network Chat Application Project
+# 🌐 Network Chat Application Project
 
-## Description
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-This project is a multi-user chat application built for the Networking Course. It implements all core components of Option 1, including a custom protocol, public chat over TCP, reliable private messaging over UDP, and a network topology discovery service. The application features a modern, responsive graphical user interface.
+A multi-user network chat application with a rich user interface, featuring public chat over TCP, reliable private messaging over UDP, and network topology discovery.
 
-It supports:
-- **Dual Protocol Communication:** Uses TCP for reliable public chat and UDP for low-latency private messaging and peer discovery.
-- **Graphical User Interface:** A user-friendly GUI built with customtkinter.
-- **Network Topology Discovery:** Automatically discovers other users on the local network and displays them, along with Round-Trip Time (RTT) measurements.
-- **Reliable UDP:** Implements a custom reliability layer on top of UDP with sequence numbers and acknowledgments to prevent message loss.
-- **Performance Testing:** Includes built-in tools to measure TCP latency (RTT) and throughput directly from the UI.
+## 🖼️ Screenshots
 
-## Team Members
+*You can add one or more screenshots here showing the application's interface, user list, and chat screen. This is a great way to showcase what your project looks like visually.*
 
-- Mehmet Emre Kayacan
-- Oğuz Genç
-- Muhammed Enes Çetinkaya
+![image](https://user-images.githubusercontent.com/12345/67890.png)
 
-## Dependencies
+## 🚀 About This Project
 
-All required Python libraries are listed in the `requirements.txt` file.
+This project is a comprehensive chat application developed for a Networking course. It implements all the core components of the course requirements, including a custom communication protocol, public chat over TCP, reliable private messaging over UDP, and a network topology discovery service. The application features a modern and responsive graphical user interface.
 
-## Installation and Running Instructions
+## ✨ Key Features
 
-These instructions will guide you through setting up and running the application.
+- 💬 **Dual Protocol Communication**: Uses TCP for the reliability of public chat and UDP for the low latency of private messages and user discovery.
+- 🎨 **Modern UI**: An intuitive and aesthetically pleasing interface built with `customtkinter`.
+- 🗺️ **Network Topology Discovery**: Automatically discovers other users on the local network and displays them, along with Round-Trip Time (RTT) measurements.
+- 🛡️ **Reliable UDP**: A custom reliability layer built on top of UDP with sequence numbers and acknowledgment mechanisms to prevent message loss and out-of-order delivery.
+- 📊 **Performance Testing**: Includes built-in tools to measure TCP latency (RTT) and throughput directly from the user interface.
 
-1.  **Unzip the Archive:**
-    Extract the contents of the `.zip` file into a folder on your computer.
+## 🛠️ Tech Stack
+
+- [Python](https://www.python.org/)
+- [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)
+- Socket Programming (TCP/IP & UDP)
+
+## 📂 Project Structure
+
+```
+network-chat/
+│
+├── 📜 start_server.py       # Main script to launch the server (TCP & UDP)
+├── 🖥️ server.py             # Server logic, client management, and message routing
+├── 🎨 chat_gui.py           # Client-side graphical user interface
+├── 📦 protocol.py           # Custom protocol definitions for client-server communication
+├── 📡 topology_discovery.py # Logic for discovering other clients and measuring RTT
+├── 📄 requirements.txt      # Required Python libraries
+└── 📖 README.md             # This file
+```
+
+## ⚙️ Installation and Setup
+
+Follow these steps to set up and run the application on your local machine.
+
+1.  **Clone (or Download) the Project:**
+    ```sh
+    git clone https://your-repository-link.git
+    cd network-chat
+    ```
+    Or download the `.zip` file and extract it to a folder.
 
 2.  **Create a Virtual Environment (Recommended):**
     Open a terminal in the project folder and run the following commands:
@@ -42,35 +68,42 @@ These instructions will guide you through setting up and running the application
     ```
 
 3.  **Install Dependencies:**
-    With the virtual environment active, install the required libraries using the provided file:
+    With the virtual environment active, install the required libraries:
     ```bash
     pip install -r requirements.txt
     ```
 
 4.  **Run the Application:**
 
-    This application requires a dedicated server to be running before clients can connect.
+    This application requires a server to be running before clients can connect.
 
     **A. Start the Server:**
-    - Open your terminal or command prompt.
-    - Navigate to the project directory.
-    - Run the `start_server.py` script. This will launch the TCP and UDP servers.
+    - In your terminal, navigate to the project directory and run the `start_server.py` script.
     ```sh
     python start_server.py
     ```
-    - The server will remain running in this terminal window.
+    - The server will keep running in this terminal window.
 
     **B. Start the Client(s):**
-    - Open a **new** terminal for each client you want to run.
-    - Navigate to the project directory.
-    - Run the `chat_gui.py` file using Python.
+    - Open a **new terminal** for each client you want to run.
+    - Navigate to the project directory and run the `chat_gui.py` file.
     ```sh
     python chat_gui.py
     ```
     - The application window will open. You can launch multiple clients this way.
 
-## How to Use
-1.  On each client window, **enter a unique username** in the "Username" field.
-2.  Click **"🚀 Connect"**.
+## 📖 Usage
+1.  In each client window, enter a **unique username** in the "Username" field.
+2.  Click the **"🚀 Connect"** button.
     - This will connect the client to the dedicated server.
-3.  You can now chat in the public room, or select users for private messaging. 
+3.  You can now chat in the public room or select a user from the list for private messaging.
+
+## 👥 Team Members
+
+- Mehmet Emre Kayacan
+- Oğuz Genç
+- Muhammed Enes Çetinkaya
+
+## 📄 License
+
+This project is distributed under the MIT License. See the `LICENSE` file for more information. 
