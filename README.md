@@ -7,8 +7,6 @@ A multi-user network chat application with a rich user interface, featuring publ
 
 ## 🖼️ Screenshots
 
-*You can add one or more screenshots here showing the application's interface, user list, and chat screen. This is a great way to showcase what your project looks like visually.*
-
 ![GUI Screenshot](./image_gui.png)
 
 ## 🚀 About This Project
